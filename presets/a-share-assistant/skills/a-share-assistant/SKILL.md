@@ -24,6 +24,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 链路就绪后允许（且建议）确认参数：`node __PROJECT_ROOT__/src/cli.js data --kind <端点> --help` 输出该端点必填参数与示例；`check` 末尾也有常用参数速查。**"禁考古"只针对链路未就绪时，链路就绪后读参数元数据不算考古。**
 
+**一键体检**：`investigate --code X [--report YYYY-N]` 一次拉齐行情/财务三表/估值/异动并落盘（indicators 需 `--report`，否则另取）——个股体检首选，比逐条 `data` 省多轮往返与 token。
+
 | 端点类型 | 参数 | 说明 |
 | :--- | :--- | :--- |
 | 行情/估值/异动/竞价 | `--thscodes 600396.SH,001258.SZ` | **复数、逗号分隔**；price-snapshot 缺 `thscodes` 会返回全市场（接口不报错），务必带并核对 total |

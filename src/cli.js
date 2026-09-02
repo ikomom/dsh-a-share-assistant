@@ -22,7 +22,7 @@ function fail(msg) {
   process.exit(1);
 }
 
-async function cmdCheck() {
+async function cmdCheck(opts = {}) {
   log('== A股助手数据链路体检 ==');
   log(`Node: ${process.version}`);
   log(`CLI 版本: ${CLI_VERSION}`);
@@ -65,6 +65,7 @@ async function cmdCheck() {
   log(`试调: ${dl.probe.detail}`);
   const ready = dl.keyOk && dl.endpointsCount > 0 && dl.probe.ok;
   log(ready ? '→ 数据链路就绪，可以取数' : '→ 数据链路未就绪：请先补 key / 端点映射后再取数，不要现场翻源码找接口');
+  if (opts.quick) return; // --quick：只看链路就绪，跳过缓存索引与参数速查
   log('-- 缓存索引 --');
   const st = cache.status();
   log(`磁盘占用: ${st.sizeHuman}`);
@@ -274,6 +275,37 @@ function printDataSummary(result) {
   }
 }
 
+// ── 一键个股体检：node cli.js investigate --code X [--report YYYY-N] ──
+async function cmdInvestigate(opts) {
+  if (!opts.code) fail('investigate 需要 --code <代码，如 600519.SH>');
+  const code = opts.code;
+  // 一次拉齐个股体检常用数据并落盘（indicators 需报告期，另取）
+  const jobs = [
+    ['quote', 'price-snapshot', { thscodes: code }],
+    ['income', 'income-statements', { thscode: code, period: 'quarterly', limit: 4 }],
+    ['balance', 'balance-sheets', { thscode: code, period: 'quarterly', limit: 4 }],
+    ['cashflow', 'cash-flow-statements', { thscode: code, period: 'quarterly', limit: 4 }],
+    ['valuation', 'valuations-snapshot', { thscodes: code }],
+    ['event', 'anomaly-analysis-stock', { thscodes: code }],
+  ];
+  if (opts.report) jobs.push(['indicators', 'financial-indicators', { thscode: code, report: opts.report }]);
+  log(`一键体检 ${code}：`);
+  const done = [];
+  for (const [type, kind, params] of jobs) {
+    try {
+      const r = await getData(kind, params);
+      if (r && r.code !== undefined && r.code !== 0) throw new Error(`code=${r.code} ${r.message}`);
+      const f = cache.saveStock({ code, type, data: r.data ?? r });
+      done.push(`${type}`);
+      log(`  ✔ ${type.padEnd(10)} ${path.basename(f)}`);
+    } catch (e) {
+      log(`  ✗ ${type.padEnd(10)} ${e.message}`);
+    }
+  }
+  log(`  完成: ${done.join('、')}`);
+  log(`  财务指标另取: data --kind financial-indicators --thscode ${code} --report YYYY-N（或用 --report 一并取）`);
+}
+
 // ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today> ──
 async function cmdPosition(argv) {
   const sub = argv._[0];
@@ -434,6 +466,8 @@ function cmdHelp() {
                             清理归档（默认近30天保留）
   data           --kind K [参数] [--save T [--code X] [--date D]]
                             取数并可选落缓存（--save 指定缓存类型；--code 存个股级）
+  investigate    --code X [--report YYYY-N]
+                            一键个股体检（拉齐行情/三表/估值/异动并落盘）
 
 data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）
@@ -461,7 +495,7 @@ export async function main() {
     allowPositionals: true,
     options: {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
-      help: { type: 'boolean' }, full: { type: 'boolean' },
+      help: { type: 'boolean' }, full: { type: 'boolean' }, quick: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
@@ -484,13 +518,14 @@ export async function main() {
   });
 
   const cmd = positionals[0];
-  if (cmd === 'check') return cmdCheck();
+  if (cmd === 'check') return cmdCheck(values);
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') return cmdHelp();
   if (cmd === 'config') return cmdConfig(values);
   if (cmd === 'cache') return cmdCache({ _: positionals.slice(1), values });
   if (cmd === 'position') return cmdPosition({ _: positionals.slice(1), values });
+  if (cmd === 'investigate') return cmdInvestigate(values);
   if (cmd === 'data') return cmdData(values);
-  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|help>（跑 help 看全部用法）');
+  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|investigate|help>（跑 help 看全部用法）');
   process.exitCode = 1;
 }
 
