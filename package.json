@@ -1,6 +1,7 @@
 {
   "name": "dsh-a-share-assistant",
   "version": "0.1.2",
+  "license": "MIT",
   "description": "DSH 插件：A股助手（预设包 + 缓存 CLI + fuyao 数据接入）",
   "type": "module",
   "private": true,

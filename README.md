@@ -1,59 +1,95 @@
 # dsh-a-share-assistant
 
-DSH 插件：A股助手。新建会话时选择「A股助手」预设，即可在对话中完成 A 股研究（选股 / 排雷 / 盯盘 / 复盘），数据走本地缓存层。
+**中文**
 
-## 形态
+[![Release v0.1.2](https://img.shields.io/badge/release-v0.1.2-5B4CF0?style=flat-square)](https://github.com/ikomom/dsh-a-share-assistant)
+[![Node >=18](https://img.shields.io/badge/Node-%3E%3D18-0B7285?style=flat-square)](https://nodejs.org/)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh%20plugin-5B4CF0?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 
-- **预设包**：`presets/a-share-assistant/`（preset.yml + agent.cordis.yml + skills）→ 安装进 `~/.dsh/.agent-presets/`
-- **缓存 CLI**：`src/cli.js`（node 实现，写入 `.stock-analysis`）——仅供本插件内部与手动运维使用
-- **数据源**：同花顺金融数据 API（fuyao.aicubes.cn，`node fetch` 直连）
+**DeepSeek Harness A股研究助手插件**：新建会话选择「A股助手」预设，即可在对话中完成选股、排雷、盯盘、复盘。数据走同花顺金融数据 API（fuyao.aicubes.cn），带本地缓存层。
 
-## 目录约定
+## 功能
 
+| 能力 | 说明 |
+|---|---|
+| 场景路由 | 选股 / 个股体检、盯盘、复盘、策略验证 5 大场景，AI 按路由调数据 |
+| 数据能力 | 23 个真实端点：行情快照、历史K线、财务三表、财务指标、涨跌停/炸板池、连板天梯、龙虎榜（机构/游资）、热股榜、异动原因、集合竞价、估值、板块/概念、指数、交易日历 |
+| 本地缓存 | `.a-share-assistant/` 目录，JSON 索引 + 三档保留（近30天散装→月zip归档→超期删除）、按标的过滤、TTL 过期判定 |
+| 个股体检 | 财务三表 + 指标 + 估值 + 异动 + 新闻兜底，一票否决式排雷，结论带数据时间戳 |
+| 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进 vault |
+| 先体检禁考古 | 数据任务第一步跑 `check`，链路未就绪立即停下给指引，绝不现场翻源码 |
+| 技能纯净 | 宿主注入的无关全局技能被隔离，AI 只认本插件技能 |
+| 错误自愈 | 端点参数元数据 + 必填预检 + 缺参示例命令，参数试错次数大幅下降 |
+
+## 数据源与缓存
+
+- **数据源**：同花顺金融数据 API（fuyao.aicubes.cn），HTTP 直连，跨平台。
+- **缓存**：系统产物（配置 + 缓存）放会话工作目录 `.a-share-assistant/`，git 忽略、Obsidian 默认隐藏；用户产物（复盘笔记）放会话目录可见位置。
+- **API Key**：需在 https://fuyao.aicubes.cn 官网自签，填入 `.a-share-assistant/config.json` 的 `fuyao.apiKey`（**不写进代码/仓库**）。
+
+## 安装
+
+前置：Node.js ≥ 18、DeepSeek Harness 环境、你自己的 fuyao API Key。
+
+```bash
+# 1. 克隆
+git clone https://github.com/ikomom/dsh-a-share-assistant.git
+cd dsh-a-share-assistant
+
+# 2. 安装预设（复制到 ~/.dsh/.agent-presets/）
+node scripts/install-preset.js
+
+# 3. 生成配置
+node src/cli.js config --init
+
+# 4. 编辑 .a-share-assistant/config.json，填写：
+#     vaultRoot  你的笔记库目录（如 D:/docs/private-doc 或 ~/notes）
+#     cacheRoot  缓存目录（默认 .a-share-assistant/cache，可留空）
+#     fuyao.apiKey  你的 fuyao API Key（必填）
 ```
-. 工作区根
-├── .stock-analysis/   # 缓存层（git 忽略，插件读写）
-└── 学习/金融/复盘/     # AI 生成的复盘笔记（进 git）
-```
+
+安装后：DSH 界面**新建会话 → 预设选择「A股助手」**，先跑一次 `node src/cli.js check` 自检。
 
 ## 使用
 
+对话中直接说：
+
+- 「帮我看看华电辽能的情况」→ 个股体检报告
+- 「今天有什么题材值得看？」→ 盘前找方向（板块/涨停/新闻）
+- 「收盘复盘」→ 自动生成复盘笔记
+- 「这个策略历史表现如何」→ 历史行情/财务做策略验证
+
+### CLI 子命令
+
 ```bash
-# 环境自检（网络连通性 + 缓存目录）
-node src/cli.js check
-
-# 缓存管理
-node src/cli.js cache status
-node src/cli.js cache snapshot --type limit-up --file limit-up.json
-node src/cli.js cache latest --type limit-up
-node src/cli.js cache get --type limit-up --date 2026-08-19
-node src/cli.js cache clean
-
-# 安装预设到 DSH
-node scripts/install-preset.js
+node src/cli.js check                # 数据链路体检（网络/Key/端点/缓存 + 参数速查）
+node src/cli.js config --init        # 生成配置
+node src/cli.js config --template    # 生成模板自行创建
+node src/cli.js config --status      # 查看配置状态
+node src/cli.js cache status         # 缓存状态
+node src/cli.js cache latest --type <type> [--code X]   # 取最近缓存（--code 查个股）
+node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
+                                     # 取数并可选落缓存（--kind X --help 看参数）
 ```
 
-## 设计约束（实测结论）
-
-- 本机 PowerShell/curl 的 SSL（schannel）无法连通 fuyao / GitHub，**只有 Node fetch 可用**——所有取数必须走 Node
-- API Key 等敏感值一律不写进代码/预设，放环境变量（`FUYAO_API_KEY`）或 会话目录 `./.a-share-assistant/config.json` 的 `fuyao.apiKey` 字段（系统产物目录，git 忽略）（需在 https://fuyao.aicubes.cn 官网签发）
-- 缓存目录由 `./.a-share-assistant/config.json` 的 `cacheRoot` 指定（默认 `./.a-share-assistant/cache`），可用环境变量 `A_SHARE_CACHE_DIR` 覆盖
-- **工作目录约束**：A股助手预设的会话应选择 vault 目录（`./.a-share-assistant/config.json` 的 `vaultRoot`）作为工作目录；复盘笔记写入 `{{cwd}}/复盘/`，不依赖会话 cwd
-- **先体检禁考古**：会话中任何数据任务第一步运行 `node src/cli.js check`；若数据链路未就绪（key 缺失/端点为空），立即告知用户修复指引，禁止现场翻文档/源码猜接口
+端点参数示例：`data --kind price-historical --thscode 600396.SH --interval 1d --start 2026-08-01 --end 2026-08-17`。
+详细参数用 `data --kind <端点> --help` 查询，`check` 末尾有速查表。
 
 ## 跨平台支持
 
 | 平台 | 状态 | 说明 |
 | :--- | :--- | :--- |
-| Windows | ✅ 已验证 | 本机完整跑通；schannel TLS 仅 Windows 有，取数走 CLI（内部 node fetch）绕过 |
-| Linux | 🟡 代码兼容，未实测 | node + 跨平台 path + HTTP 数据源，无盘符硬编码；建议先跑 `node src/cli.js check` 自检；问财 SkillHub CLI（`.sh`）反而原生 |
-| macOS | 🟡 代码兼容，未实测 | 同 Linux，跑 `check` 自检 |
+| Windows | ✅ 已验证 | 完整跑通；取数走 CLI（内部 node fetch），绕过 schannel TLS 限制 |
+| Linux / macOS | 🟡 代码兼容，未实测 | node + 跨平台 path + HTTP 数据源，零盘符硬编码；安装后跑 `check` 自检 |
 
-**通用安装**（任何平台一致）：
-1. `node >= 18`（install 前置检查）
-2. `node scripts/install-preset.js`（复制预设到 `~/.dsh/.agent-presets/`，按平台注入 persona 提示）
-3. `node src/cli.js config --init` → 编辑 `./.a-share-assistant/config.json` 填 `vaultRoot / cacheRoot / fuyao.apiKey`（**自备 key**，官网签发）
-4. 新建会话选「A股助手」，先跑 `check` 自检
+换平台/机器只需重新配置 `.a-share-assistant/config.json`，无需改代码。
 
-**给使用者的关键提醒**：本插件**需要你自己的 fuyao API Key**（数据源是付费/需登录签发的服务），不属于"clone 即免 key 使用"；但代码/路径/配置完全跟机器走，换平台、换机器只需重新配置，无需改代码。
+## 安全与合规
 
+- API Key 只存 `.a-share-assistant/config.json`（git 忽略），代码/仓库零敏感值
+- 数据仅限自用，不二次分发
+- 工具输出的所有结论可溯源（数据源原值 + 时间戳），不编造数字
+
+## License
+
+MIT
