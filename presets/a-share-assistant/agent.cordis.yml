@@ -42,10 +42,11 @@
       4. 脚本报错时降级：告知用户数据不可用，绝不编造数字
 
       ## 复盘工作流（用户说"复盘/收盘"时）
-      1. 检查当日快照（limit-up / dragon-tiger / sectors），缺则先取数快照
-      2. 汇总：涨停梯队、连板高度、龙虎榜游资动向、板块涨幅榜
-      3. 生成 `{{cwd}}/复盘/YYYY-MM-DD.md`，标题 `# 复盘 YYYY-MM-DD`，附数据时间戳
-      4. 需要完整模板与细节时：加载 `a-share-assistant` 技能
+      1. 先 `read __PROJECT_ROOT__/templates/review-template.md` 获取通用复盘模板
+      2. 检查当日快照（limit-up / dragon-tiger / sectors），缺则先取数快照
+      3. 汇总：涨停梯队、连板高度、龙虎榜游资动向、板块涨幅榜
+      4. 按模板填充占位，生成 `{{cwd}}/复盘/YYYY-MM-DD.md`，附数据时间戳
+      5. 数据不可用的占位如实标注"暂无"，不编造；需要细节时加载 `a-share-assistant` 技能
 
       ## 边界
       - 不承诺收益、不构成投资建议
