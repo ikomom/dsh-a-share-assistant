@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getData } from './fuyao.js';
-import { homeDir } from './config.js';
+import { homeDir, getFeeProfile } from './config.js';
 
 const FILE_NAME = 'portfolio.json';
 
@@ -47,6 +47,16 @@ function ensureNextId(p) {
   const maxId = p.history.reduce((m, h) => Math.max(m, Number(h.id) || 0), 0);
   if (typeof p.nextId !== 'number' || p.nextId <= maxId) p.nextId = maxId + 1;
   return p.nextId;
+}
+
+/** 按费率估算一笔交易的手续费（side=buy|sell；account 选配置文件中的 feeProfiles 账户） */
+export function estimateFee({ side, shares, price, account }) {
+  const p = getFeeProfile(account);
+  const amount = shares * price;
+  const commission = Math.max(amount * p.commissionRate, p.commissionMin || 0);
+  const transfer = amount * (p.transferFeeRate || 0);
+  const stamp = side === 'sell' ? amount * (p.stampTaxRate || 0) : 0;
+  return round2(commission + transfer + stamp);
 }
 
 /** 建仓 / 加仓（fee 为手续费，计入成本；psych 为可选心理备注） */

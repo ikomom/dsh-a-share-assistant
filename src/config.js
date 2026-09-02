@@ -74,3 +74,16 @@ export function getWatchlist() {
   return Array.isArray(cfg.watchlist) ? cfg.watchlist : [];
 }
 
+// ── 交易费率（A股，默认；可在 config 的 feeProfiles 里按账户覆盖）─────────────
+const DEFAULT_FEE = {
+  commissionRate: 0.00025,   // 佣金 万2.5（双向）
+  commissionMin: 5,          // 单笔佣金最低 5 元
+  stampTaxRate: 0.0005,      // 印花税 0.05%（仅卖出）
+  transferFeeRate: 0.00001,  // 过户费 0.001%（双向）
+};
+
+export function getFeeProfile(name) {
+  const profs = cfg.feeProfiles || {};
+  return profs?.[name] || profs?.default || DEFAULT_FEE;
+}
+

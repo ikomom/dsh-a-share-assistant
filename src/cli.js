@@ -268,16 +268,20 @@ async function cmdPosition(argv) {
       if (!o.code) fail('position add 需要 --code <代码，如 600519.SH>');
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position add 需要 --shares <股数> 与 --price <价格>');
-      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: num(o.fee) });
-      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
+      let feeVal = num(o.fee);
+      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account });
+      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal });
+      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}${feeVal ? `（手续费${feeVal}）` : ''}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
       return;
     }
     case 'sell': {
       if (!o.code) fail('position sell 需要 --code');
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position sell 需要 --shares 与 --price');
-      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: num(o.fee) });
-      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
+      let feeVal = num(o.fee);
+      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'sell', shares: s, price: pr, account: o.account });
+      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal });
+      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}${feeVal ? `（手续费${feeVal}）` : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
       return;
     }
     case 'psych': {
@@ -427,6 +431,7 @@ export async function main() {
       help: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' },
+      'auto-fee': { type: 'boolean' }, account: { type: 'string' },
       kind: { type: 'string' }, type: { type: 'string' },
       code: { type: 'string' },
       date: { type: 'string' }, 'date-ms': { type: 'string' },

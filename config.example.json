@@ -6,5 +6,13 @@
     "baseUrl": "https://fuyao.aicubes.cn",
     "docsUrl": "https://fuyao.aicubes.cn/docs/",
     "apiKey": ""
+  },
+  "feeProfiles": {
+    "default": {
+      "commissionRate": 0.00025,
+      "commissionMin": 5,
+      "stampTaxRate": 0.0005,
+      "transferFeeRate": 0.00001
+    }
   }
 }
