@@ -205,11 +205,13 @@ async function cmdData(opts) {
     q: opts.q, thscodes: opts.thscodes, thscode: opts.thscode,
     limit: opts.limit, offset: opts.offset, interval: opts.interval,
     start: opts.start, end: opts.end, adjust: opts.adjust,
+    from: opts.from, to: opts.to,
     period: opts.period, report: opts.report, tag: opts.tag,
     date: opts.date, 'date_ms': opts['date-ms'],
     board_type: opts['board-type'], page: opts.page, size: opts.size,
     sort_field: opts['sort-field'], sort_dir: opts['sort-dir'],
     stage: opts.stage, exchange: opts.exchange, asset_type: opts['asset-type'],
+    tag_codes: opts['tag-codes'], start_date: opts['start-date'], end_date: opts['end-date'],
   };
   const params = {};
   for (const [k, v] of Object.entries(paramMap)) {
@@ -373,6 +375,8 @@ export async function main() {
       'board-type': { type: 'string' }, page: { type: 'string' }, size: { type: 'string' },
       'sort-field': { type: 'string' }, 'sort-dir': { type: 'string' },
       stage: { type: 'string' }, exchange: { type: 'string' }, 'asset-type': { type: 'string' },
+      from: { type: 'string' }, to: { type: 'string' },
+      'tag-codes': { type: 'string' }, 'start-date': { type: 'string' }, 'end-date': { type: 'string' },
     },
   });
 

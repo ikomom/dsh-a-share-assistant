@@ -70,6 +70,10 @@ export const ENDPOINTS = {
     path: '/api/meta/tickers/search', note: '标的检索（名称模糊/代码精确）',
     params: { required: ['q'], example: '--kind ticker-search --q 华电辽能 --limit 5' },
   },
+  'tickers-list': {
+    path: '/api/meta/tickers/list', note: '标的列表/代码表（分页，asset_type 过滤）',
+    params: { required: [], example: '--kind tickers-list --asset-type a-share --limit 1000 --offset 0' },
+  },
   'price-snapshot': {
     path: '/api/a-share/prices/snapshot', note: 'A股行情快照(实时)',
     params: { required: ['thscodes'], example: '--kind price-snapshot --thscodes 600396.SH,001258.SZ', warn: '缺 thscodes 会返回全市场数据，个股行情务必带 --thscodes 并核对 total' },
@@ -118,6 +122,14 @@ export const ENDPOINTS = {
     path: '/api/a-share/special-data/hot-stock-list', note: 'A股热股榜 Top30',
     params: { required: [], example: '--kind hot-stock-list --period day' },
   },
+  'hot-stock-list-history': {
+    path: '/api/a-share/special-data/hot-stock-list-history', note: '历史热股排行（按自然日）',
+    params: { required: ['date'], example: '--kind hot-stock-list-history --date 2026-08-17', warn: 'date 只支持一年内数据' },
+  },
+  'hot-stock-rank-trend': {
+    path: '/api/a-share/special-data/hot-stock-rank-trend', note: '个股热榜排名走势',
+    params: { required: ['thscode', 'start_date', 'end_date'], example: '--kind hot-stock-rank-trend --thscode 300034.SZ --start-date 2026-06-21 --end-date 2026-07-01' },
+  },
   'skyrocket-list': {
     path: '/api/a-share/special-data/skyrocket-list', note: '飙升榜',
     params: { required: [], example: '--kind skyrocket-list' },
@@ -125,6 +137,14 @@ export const ENDPOINTS = {
   'anomaly-analysis-stock': {
     path: '/api/a-share/special-data/anomaly-analysis-stock', note: '个股异动原因',
     params: { required: ['thscodes'], example: '--kind anomaly-analysis-stock --thscodes 600396.SH' },
+  },
+  'anomaly-analysis-list': {
+    path: '/api/a-share/special-data/anomaly-analysis-list', note: '当日个股异动原因列表（可按标签过滤）',
+    params: { required: [], example: '--kind anomaly-analysis-list --tag-codes LIMIT_UP,SHARP_FALL', warn: 'tag_codes 合法值: LIMIT_UP/LIMIT_DOWN/SHARP_RISE/SHARP_FALL/RAPID_RALLY/RAPID_DECLINE' },
+  },
+  'adjustment-factors': {
+    path: '/api/a-share/corporate-actions/adjustment-factors', note: '复权因子事件流（单只标的）',
+    params: { required: ['thscode'], example: '--kind adjustment-factors --thscode 600396.SH --from 2026-08-01 --to 2026-08-17' },
   },
   'auction-snapshot': {
     path: '/api/a-share/auction/snapshot', note: 'A股集合竞价快照',

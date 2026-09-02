@@ -36,14 +36,15 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | 数据 | 来源（端点 type） | 缓存类型 | 说明 |
 | :--- | :--- | :--- | :--- |
 | 实时行情 | price-snapshot / valuations-snapshot | watchlist | TTL 24h；估值含 PE/PB/PS/PCF |
-| 历史K线 | price-historical | stock:<code>:kline | 日线、前复权 |
+| 历史K线 | price-historical / adjustment-factors | stock:<code>:kline | 日线、前复权 + 复权因子事件 |
 | 财务三表 | income-statements / balance-sheets / cash-flow-statements | stock:<code>:finance | 季度/年报，TTL 90天 |
 | 财务指标 | financial-indicators（report=YYYY-N） | stock:<code>:finance | 成长/盈利/偿债/营运/现金流五类 |
 | 涨停/连板 | limit-up-pool / limit-up-ladder | limit-up | 每日收盘快照，复盘核心 |
 | 跌停/炸板 | limit-down-pool / limit-break-pool | limit-up | 情绪面 |
 | 龙虎榜/游资 | dragon-tiger-list（board_type=org/hot_money） | dragon-tiger | 每日 |
-| 热榜 | hot-stock-list / skyrocket-list | hot-stock | 题材热度 |
-| 异动原因 | anomaly-analysis-stock | stock:<code>:event | 当日异动 |
+| 热榜 | hot-stock-list / skyrocket-list / hot-stock-list-history / hot-stock-rank-trend | hot-stock | 题材热度（含历史/个股走势） |
+| 异动原因 | anomaly-analysis-stock / anomaly-analysis-list | stock:<code>:event | 当日异动（个股+列表） |
+| 标的列表 | tickers-list | — | 全量代码表（asset_type 过滤，分页） |
 | 集合竞价 | auction-snapshot / short-term-benchmark | auction | 盘前情绪 |
 | 板块/题材 | ths-index-list（tag=cn_concept/industry）+ index-constituents | sectors | **板块代理：THS概念/行业指数** |
 | 指数行情 | index-price-snapshot / index-price-historical | index | 大盘参照 |
