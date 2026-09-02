@@ -106,5 +106,5 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 ### 收盘复盘
 1. 快照 limit-up / dragon-tiger / sectors
-2. 按模板生成 `{{cwd}}/学习/金融/复盘/YYYY-MM-DD.md`
+2. 按模板生成 `{{cwd}}/复盘/YYYY-MM-DD.md`（插件自己的复盘目录，不绑定用户笔记库结构）
 3. 提示时间戳与注意事项
