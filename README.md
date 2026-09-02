@@ -27,6 +27,8 @@
 
 ## 安装
 
+### 方式一：命令安装
+
 前置：Node.js ≥ 18、DeepSeek Harness 环境、你自己的 fuyao API Key（在 https://fuyao.aicubes.cn 官网签发）。
 
 ```bash
@@ -45,8 +47,14 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 }
 ```
 
-安装后：DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/cli.js check` 自检。
-其它平台 / 已授权机器：只需重新配置 `./.a-share-assistant/config.json`，无需改代码。
+### 方式二：一句话请 AI 装
+
+把 [`AI_INSTALL.md`](./AI_INSTALL.md) 里的指令块整段发给任意 DSH 会话的 AI，AI 会自动完成克隆 → 装预设 → 引导配置 → 自检 → 收尾；需你决策的用 `ask_user` 询问，key 不经过对话。
+
+### 安装后
+
+DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/cli.js check` 自检。
+其它平台 / 另一台机器：只需重新配置 `./.a-share-assistant/config.json`，无需改代码。
 
 ## 使用
 
