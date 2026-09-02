@@ -94,7 +94,7 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 ## 交易台账（position）
 
-记录本金、建仓、加仓、减仓/清仓；数据存 `{{cwd}}/交易记录/portfolio.json`（**个人财务数据，敏感，git 忽略**）。
+记录本金、建仓、加仓、减仓/清仓；数据存 `{{cwd}}/.a-share-assistant/交易记录/portfolio.json`（**个人财务数据，敏感，git 忽略**）。
 
 ```bash
 node __PROJECT_ROOT__/src/cli.js position init --capital 200000     # 设初始本金

@@ -3,12 +3,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getData } from './fuyao.js';
+import { homeDir } from './config.js';
 
 const DATA_DIR_NAME = '交易记录';
 const FILE_NAME = 'portfolio.json';
 
 export function portfolioFile() {
-  return path.join(process.cwd(), DATA_DIR_NAME, FILE_NAME);
+  // 台账放在系统产物目录 .a-share-assistant/交易记录/ 下（隐藏、git 忽略）
+  return path.join(homeDir(), DATA_DIR_NAME, FILE_NAME);
 }
 
 function ensureDir(f) {
