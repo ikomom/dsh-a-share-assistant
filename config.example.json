@@ -1,0 +1,10 @@
+{
+  "vaultRoot": "",
+  "cacheRoot": "",
+  "watchlist": [],
+  "fuyao": {
+    "baseUrl": "https://fuyao.aicubes.cn",
+    "docsUrl": "https://fuyao.aicubes.cn/docs/",
+    "apiKey": ""
+  }
+}

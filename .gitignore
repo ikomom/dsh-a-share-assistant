@@ -1,0 +1,4 @@
+# A股助手：系统产物（含 key 的配置/缓存）与依赖，不入库
+.a-share-assistant/
+node_modules/
+*.local.json

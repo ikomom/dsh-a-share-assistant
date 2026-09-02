@@ -1,0 +1,19 @@
+{
+  "name": "dsh-a-share-assistant",
+  "version": "0.1.2",
+  "description": "DSH 插件：A股助手（预设包 + 缓存 CLI + fuyao 数据接入）",
+  "type": "module",
+  "private": true,
+  "main": "src/index.js",
+  "bin": {
+    "a-share": "src/entry.js"
+  },
+  "scripts": {
+    "install:preset": "node scripts/install-preset.js",
+    "cache": "node src/cli.js cache",
+    "check": "node src/cli.js check"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

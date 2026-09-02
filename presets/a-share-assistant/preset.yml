@@ -1,0 +1,3 @@
+name: A股助手
+description: A股研究助手：对话式选股/排雷/盯盘/复盘，数据走本地缓存（fuyao 数据源 + .stock-analysis 缓存层）。
+order: 5
