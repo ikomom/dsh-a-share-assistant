@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// 安装 A股助手 preset 到 DSH 用户目录：
-//   复制 presets/a-share-assistant → ~/.dsh/.agent-presets/a-share-assistant
-//   替换 __PROJECT_ROOT__ / __CACHE_ROOT__ / __VAULT_ROOT__ / __SKILL_MD__ 占位符
-//   运行时配置（cacheRoot/vaultRoot/apiKey）读用户态 ~/.dsh/a-share-assistant.json，
-//   首次安装自动从 config.example.json 生成并引导填写。
+// 安装 A股助手 preset 到 DSH 用户目录（一键安装入口）：
+//   1) 复制 presets/a-share-assistant → ~/.dsh/.agent-presets/a-share-assistant
+//   2) 替换路径/平台占位符
+//   3) 配置缺失时：TTY 下交互询问是否用 `cli.js config --init` 生成；非交互则提示
+// 用法：node scripts/install-preset.js
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // ── 前置检查与平台探测 ───────────────────────────────────────────────────────
@@ -28,14 +29,13 @@ const DEST_DIR = path.join(os.homedir(), '.dsh', '.agent-presets', PRESET_ID);
 const USER_CFG = path.join(path.resolve(process.env.A_SHARE_HOME || process.cwd()), '.a-share-assistant', 'config.json');
 const EXAMPLE_CFG = path.join(PROJECT_ROOT, 'config.example.json');
 
-// ── 用户配置：只读；缺失时不自动生成（先问后建原则），提示用 cli config 创建 ──
+// ── 用户配置：只读；缺失时不自动生成（先问后建原则），TTY 下交互询问是否生成 ──
 let config = null;
+let configMissing = false;
 if (fs.existsSync(USER_CFG)) {
   config = JSON.parse(fs.readFileSync(USER_CFG, 'utf8'));
 } else {
-  console.log(`⚠️ 未检测到配置文件: ${USER_CFG}`);
-  console.log('   安装继续，但请先创建配置：node src/cli.js config（交互询问）或 config --init / config --template');
-  console.log('');
+  configMissing = true;
   config = {}; // 空配置：占位符回退到未配置状态
 }
 
@@ -85,5 +85,30 @@ console.log(`  vault 根: ${VAULT_ROOT}`);
 console.log(`  平台: ${PLATFORM}（${PLATFORM_NOTE}）`);
 console.log('');
 console.log('支持矩阵：Windows（本机已验证）/ Linux、macOS（代码跨平台兼容，建议安装后先跑 `node src/cli.js check` 自检）');
-console.log('下一步：在 DSH Web 界面「新建会话」→ 预设选择「A股助手」。');
+
+// ── 配置缺失：交互引导生成（TTY），否则提示 ─────────────────────────────────
+if (configMissing) {
+  console.log('');
+  console.log(`⚠️ 未检测到配置文件: ${USER_CFG}`);
+  if (process.stdin.isTTY) {
+    console.log('是否现在用 `cli.js config --init` 生成配置文件？（y=生成，编辑后填写 apiKey；n=稍后手动创建）');
+    const { createInterface } = await import('node:readline/promises');
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    let answer = '';
+    try { answer = (await rl.question('> ')).trim().toLowerCase(); } catch {}
+    rl.close();
+    if (answer === 'y' || answer === 'yes' || answer === '是') {
+      console.log('→ 运行 config --init ...');
+      spawnSync(process.execPath, [path.join(PROJECT_ROOT, 'src', 'cli.js'), 'config', '--init'], { stdio: 'inherit' });
+      console.log('✔ 已生成配置，请编辑 `./.a-share-assistant/config.json` 填写 vaultRoot / cacheRoot / fuyao.apiKey。');
+    } else {
+      console.log('→ 请稍后运行 `node src/cli.js config --init` 或 `config --template` 创建配置。');
+    }
+  } else {
+    console.log('（非交互环境）运行 `node src/cli.js config --init`（生成）或 `--template`（模板）创建配置。');
+  }
+}
+
+console.log('');
+console.log('下一步：在 DSH Web 界面「新建会话」→ 预设选择「A股助手」，先跑 `node src/cli.js check` 自检。');
 console.log('提示：当前已打开的会话不会热切换预设，需要新建会话生效。');

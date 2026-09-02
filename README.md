@@ -29,26 +29,26 @@
 
 ## 安装
 
-前置：Node.js ≥ 18、DeepSeek Harness 环境、你自己的 fuyao API Key。
+前置：Node.js ≥ 18、DeepSeek Harness 环境、你自己的 fuyao API Key（在 https://fuyao.aicubes.cn 官网签发）。
 
 ```bash
-# 1. 克隆
-git clone https://github.com/ikomom/dsh-a-share-assistant.git
-cd dsh-a-share-assistant
-
-# 2. 安装预设（复制到 ~/.dsh/.agent-presets/）
-node scripts/install-preset.js
-
-# 3. 生成配置
-node src/cli.js config --init
-
-# 4. 编辑 .a-share-assistant/config.json，填写：
-#     vaultRoot  你的笔记库目录（如 D:/docs/private-doc 或 ~/notes）
-#     cacheRoot  缓存目录（默认 .a-share-assistant/cache，可留空）
-#     fuyao.apiKey  你的 fuyao API Key（必填）
+git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-assistant && node scripts/install-preset.js
 ```
 
-安装后：DSH 界面**新建会话 → 预设选择「A股助手」**，先跑一次 `node src/cli.js check` 自检。
+一条命令完成：预设安装 + 平台适配 + 配置引导（配置缺失时在终端交互询问是否生成；无交互环境则提示手动 `config --init`）。
+
+之后编辑 `./.a-share-assistant/config.json` 填写：
+
+```jsonc
+{
+  "vaultRoot": "你的笔记库目录，如 D:/docs/private-doc 或 ~/notes",
+  "cacheRoot": "缓存目录，默认 .a-share-assistant/cache，可留空",
+  "fuyao": { "apiKey": "你的 fuyao API Key（必填）" }
+}
+```
+
+安装后：DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/cli.js check` 自检。
+其它平台 / 已授权机器：只需重新配置 `./.a-share-assistant/config.json`，无需改代码。
 
 ## 使用
 
