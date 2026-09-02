@@ -21,7 +21,7 @@
 
 ## 数据源与缓存
 
-- **数据源**：同花顺金融数据 API（fuyao.aicubes.cn），HTTP 直连，跨平台。
+- **数据源**：同花顺金融数据 API（fuyao.aicubes.cn），HTTP 直连。
 - **缓存**：系统产物（配置 + 缓存）放会话工作目录 `.a-share-assistant/`，git 忽略、Obsidian 默认隐藏；用户产物（复盘笔记）放会话目录可见位置。
 - **API Key**：需在 https://fuyao.aicubes.cn 官网自签，填入 `.a-share-assistant/config.json` 的 `fuyao.apiKey`（**不写进代码/仓库**）。
 
@@ -54,7 +54,6 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 ### 安装后
 
 DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/cli.js check` 自检。
-其它平台 / 另一台机器：只需重新配置 `./.a-share-assistant/config.json`，无需改代码。
 
 ## 使用
 
@@ -80,15 +79,6 @@ node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
 
 端点参数示例：`data --kind price-historical --thscode 600396.SH --interval 1d --start 2026-08-01 --end 2026-08-17`。
 详细参数用 `data --kind <端点> --help` 查询，`check` 末尾有速查表。
-
-## 跨平台支持
-
-| 平台 | 状态 | 说明 |
-| :--- | :--- | :--- |
-| Windows | ✅ 已验证 | 完整跑通；取数走 CLI（内部 node fetch），绕过 schannel TLS 限制 |
-| Linux / macOS | 🟡 代码兼容，未实测 | node + 跨平台 path + HTTP 数据源，零盘符硬编码；安装后跑 `check` 自检 |
-
-换平台/机器只需重新配置 `.a-share-assistant/config.json`，无需改代码。
 
 ## 安全与合规
 
