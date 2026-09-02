@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS } from './fuyao.js';
 import * as cache from './cache.js';
+import * as position from './position.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
@@ -250,6 +251,62 @@ async function cmdData(opts) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+// ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today> ──
+async function cmdPosition(argv) {
+  const sub = argv._[0];
+  const o = argv.values;
+  const num = (v) => (v === undefined || v === '' ? NaN : Number(v));
+  switch (sub) {
+    case 'init': {
+      const c = num(o.capital);
+      if (!Number.isFinite(c) || c <= 0) fail('position init 需要 --capital <初始本金（正数）>');
+      log(`✔ 初始本金已设: ${position.setCapital(c)}`);
+      return;
+    }
+    case 'add':
+    case 'buy': {
+      if (!o.code) fail('position add 需要 --code <代码，如 600519.SH>');
+      const s = num(o.shares), pr = num(o.price);
+      if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position add 需要 --shares <股数> 与 --price <价格>');
+      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note });
+      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}`);
+      return;
+    }
+    case 'sell': {
+      if (!o.code) fail('position sell 需要 --code');
+      const s = num(o.shares), pr = num(o.price);
+      if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position sell 需要 --shares 与 --price');
+      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note });
+      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}`);
+      return;
+    }
+    case 'list': {
+      const r = await position.listPositions();
+      log(`持仓列表（初始本金 ${r.initialCapital}）:`);
+      if (!r.rows.length) { log('  （暂无持仓，用 position add 建仓）'); return; }
+      for (const x of r.rows) {
+        log(`  ${x.code.padEnd(10)} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${x.avgCost} 现价${x.price} 市值${x.marketValue} 盈亏${x.pnl}(${x.pnlPct}%)`);
+      }
+      return;
+    }
+    case 'summary': {
+      const s = await position.summary();
+      log('持仓总览:');
+      log(`  持仓数 ${s.positionCount} | 本金 ${s.initialCapital} | 投入成本 ${s.totalCost}`);
+      log(`  市值 ${s.marketValue} | 浮动盈亏 ${s.floatPnl} | 已实现 ${s.realizedPnl} | 合计 ${s.totalPnl}`);
+      return;
+    }
+    case 'today': {
+      const t = position.dayTrades(o.date);
+      log(`当日交易流水（${o.date || '今天'}）: ${t.length ? '' : '（无）'}`);
+      for (const h of t) log(`  [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${h.price}${h.realizedPnl != null ? ` 已实现 ${h.realizedPnl}` : ''}${h.note ? ' ' + h.note : ''}`);
+      return;
+    }
+    default:
+      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note] | sell --code X --shares N --price P [--date --note] | list | summary | today [--date D]');
+  }
+}
+
 // ── 配置：node cli.js config [--init|--template|--status] ──────────────────
 async function promptYesNo(question) {
   const rl = createInterface({ input, output });
@@ -362,6 +419,8 @@ export async function main() {
     options: {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
       help: { type: 'boolean' },
+      capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
+      price: { type: 'string' }, note: { type: 'string' },
       kind: { type: 'string' }, type: { type: 'string' },
       code: { type: 'string' },
       date: { type: 'string' }, 'date-ms': { type: 'string' },
@@ -385,8 +444,9 @@ export async function main() {
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') return cmdHelp();
   if (cmd === 'config') return cmdConfig(values);
   if (cmd === 'cache') return cmdCache({ _: positionals.slice(1), values });
+  if (cmd === 'position') return cmdPosition({ _: positionals.slice(1), values });
   if (cmd === 'data') return cmdData(values);
-  log('A股助手 CLI: node src/cli.js <check|config|cache|data|help>（跑 help 看全部用法）');
+  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|help>（跑 help 看全部用法）');
   process.exitCode = 1;
 }
 

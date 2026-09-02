@@ -92,6 +92,22 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 **个人主观板块留空**：六~九（操作回顾、交易心理、认知增量、明日计划+铁律）——这些是用户自己的交易记录/判断，**AI 不臆造、不替写**，标注"请用户填写"或留空。
 输出到 `{{cwd}}/复盘/YYYY-MM-DD.md`；数据不可用的板块如实标注"暂无"，不编造。
 
+## 交易台账（position）
+
+记录本金、建仓、加仓、减仓/清仓；数据存 `{{cwd}}/交易记录/portfolio.json`（**个人财务数据，敏感，git 忽略**）。
+
+```bash
+node __PROJECT_ROOT__/src/cli.js position init --capital 200000     # 设初始本金
+node __PROJECT_ROOT__/src/cli.js position add --code 600519.SH --name 贵州茅台 --shares 100 --price 1500 --date 2026-09-01 --note "计划内的主线"
+node __PROJECT_ROOT__/src/cli.js position sell --code 600519.SH --shares 50 --price 1550   # 减仓/清仓（自动算已实现盈亏）
+node __PROJECT_ROOT__/src/cli.js position list      # 持仓 + 现价/市值/浮盈（拉行情）
+node __PROJECT_ROOT__/src/cli.js position summary   # 本金/市值/盈亏总览
+node __PROJECT_ROOT__/src/cli.js position today     # 当日交易流水
+```
+
+**对话记账**：用户说「我建仓了茅台 100 股 1500」「加了 50 股 1520」「今天卖了 50 股 1550」「我的本金是 20 万」「今天交易了啥」——AI 用 `position add/sell/init/today` 记录/查询，勿让用户手动抄。
+**复盘接入**：复盘"操作回顾"板块从 `position today` 当日流水自动引用（含建仓/卖出与已实现盈亏），用户再补充盈亏感受即可。
+
 ## 常见任务模板
 
 ### 盘前找方向
