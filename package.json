@@ -2,7 +2,17 @@
   "name": "dsh-a-share-assistant",
   "version": "0.1.2",
   "license": "MIT",
-  "description": "DSH 插件：A股助手（预设包 + 缓存 CLI + fuyao 数据接入）",
+  "description": "DeepSeek Harness A股研究助手插件：对话式选股/排雷/盯盘/复盘，数据走同花顺金融数据 API，带本地缓存层（agent preset + CLI）。",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh-plugin",
+    "a-share",
+    "stock",
+    "finance",
+    "trading",
+    "cli"
+  ],
   "type": "module",
   "private": true,
   "main": "src/index.js",
