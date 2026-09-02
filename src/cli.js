@@ -268,7 +268,7 @@ async function cmdPosition(argv) {
       if (!o.code) fail('position add 需要 --code <代码，如 600519.SH>');
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position add 需要 --shares <股数> 与 --price <价格>');
-      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych });
+      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: num(o.fee) });
       log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
       return;
     }
@@ -276,7 +276,7 @@ async function cmdPosition(argv) {
       if (!o.code) fail('position sell 需要 --code');
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position sell 需要 --shares 与 --price');
-      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych });
+      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: num(o.fee) });
       log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
       return;
     }
@@ -305,7 +305,7 @@ async function cmdPosition(argv) {
     case 'today': {
       const t = position.dayTrades(o.date);
       log(`当日交易流水（${o.date || '今天'}）: ${t.length ? '' : '（无）'}`);
-      for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${h.price}${h.realizedPnl != null ? ` 已实现 ${h.realizedPnl}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
+      for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${h.price}${h.fee ? ` 手续费${h.fee}` : ''}${h.realizedPnl != null ? ` 已实现 ${h.realizedPnl}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
       return;
     }
     default:
@@ -426,7 +426,7 @@ export async function main() {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
       help: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
-      price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' },
+      price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' },
       kind: { type: 'string' }, type: { type: 'string' },
       code: { type: 'string' },
       date: { type: 'string' }, 'date-ms': { type: 'string' },

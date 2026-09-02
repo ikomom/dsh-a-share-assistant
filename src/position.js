@@ -49,19 +49,20 @@ function ensureNextId(p) {
   return p.nextId;
 }
 
-/** 建仓 / 加仓（psych 为可选心理备注，如"计划内/冲动追高"） */
-export function addPosition({ code, name = '', shares, price, date, note = '', psych = '' }) {
+/** 建仓 / 加仓（fee 为手续费，计入成本；psych 为可选心理备注） */
+export function addPosition({ code, name = '', shares, price, date, note = '', psych = '', fee = 0 }) {
   const p = loadPortfolio();
   if (!Number.isFinite(shares) || shares <= 0) throw new Error('股数必须为正数');
   if (!Number.isFinite(price) || price <= 0) throw new Error('价格必须为正数');
+  const f = Number.isFinite(fee) ? fee : 0;
   const amount = shares * price;
   const key = String(code);
   ensureNextId(p);
   const existing = p.positions[key];
   if (existing) {
-    // 加仓：加权平均成本
+    // 加仓：加权平均成本（含手续费）
     const newShares = existing.shares + shares;
-    const newCost = existing.cost + amount;
+    const newCost = existing.cost + amount + f;
     existing.shares = newShares;
     existing.avgCost = round2(newCost / newShares);
     existing.cost = round2(newCost);
@@ -71,17 +72,17 @@ export function addPosition({ code, name = '', shares, price, date, note = '', p
   } else {
     p.positions[key] = {
       code: key, name: name || key, shares,
-      avgCost: round2(price), cost: round2(amount),
+      avgCost: round2((amount + f) / shares), cost: round2(amount + f),
       openDate: date || new Date().toISOString().slice(0, 10), note,
     };
   }
-  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares, price, amount: round2(amount), date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: null });
+  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares, price, amount: round2(amount), fee: round2(f), date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: null });
   savePortfolio(p);
   return p.positions[key];
 }
 
-/** 减仓 / 清仓（psych 为可选心理备注，如"止损/情绪化卖出"） */
-export function sellPosition({ code, shares, price, date, note = '', psych = '' }) {
+/** 减仓 / 清仓（fee 为卖出手续费，从已实现盈亏扣除；psych 为可选心理备注） */
+export function sellPosition({ code, shares, price, date, note = '', psych = '', fee = 0 }) {
   const p = loadPortfolio();
   const key = String(code);
   const pos = p.positions[key];
@@ -89,8 +90,9 @@ export function sellPosition({ code, shares, price, date, note = '', psych = '' 
   ensureNextId(p);
   if (!Number.isFinite(shares) || shares <= 0) throw new Error('股数必须为正数');
   if (shares > pos.shares) throw new Error(`卖出 ${shares} 股超过持仓 ${pos.shares} 股`);
-  const realized = round2((price - pos.avgCost) * shares);
-  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares, price, amount: round2(shares * price), date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: realized });
+  const f = Number.isFinite(fee) ? fee : 0;
+  const realized = round2((price - pos.avgCost) * shares - f);
+  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares, price, amount: round2(shares * price), fee: round2(f), date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: realized });
   pos.shares -= shares;
   pos.cost = round2(pos.cost - shares * pos.avgCost);
   if (pos.shares <= 0) {
