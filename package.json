@@ -2,7 +2,7 @@
   "name": "dsh-a-share-assistant",
   "version": "0.1.2",
   "license": "MIT",
-  "description": "DeepSeek Harness A股研究助手插件：对话式选股/排雷/盯盘/复盘，数据走同花顺金融数据 API，带本地缓存层（agent preset + CLI）。",
+  "description": "DeepSeek Harness A股研究助手插件：对话式选股/排雷/盯盘/复盘，数据走同花顺金融数据 API，带本地缓存层。",
   "keywords": [
     "deepseek",
     "deepseek-harness",
