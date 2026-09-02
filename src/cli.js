@@ -69,9 +69,10 @@ async function cmdCheck() {
   const st = cache.status();
   log(`磁盘占用: ${st.sizeHuman}`);
   if (st.rows.length === 0) log('（暂无缓存数据，先跑 snapshot）');
-  for (const r of st.rows) {
+  for (const r of st.rows.slice(0, 15)) {
     log(`  ${r.label.padEnd(10)} 最新=${r.latest} 拉取=${r.fetchedAt} ${r.state}`);
   }
+  if (st.rows.length > 15) log(`  … 其余 ${st.rows.length - 15} 条（cache status 查看全部）`);
   log('-- 常用端点参数速查 --');
   log('  行情/估值/异动: --thscodes 600396.SH,001258.SZ（复数，逗号分隔；price-snapshot 缺它=全市场）');
   log('  财务三表:       --thscode X --period annual|quarterly --limit N');
@@ -248,7 +249,29 @@ async function cmdData(opts) {
     }
     return;
   }
-  console.log(JSON.stringify(result, null, 2));
+  // 默认只打印摘要以节省上下文 token；--full 才全量输出
+  if (opts.full) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  printDataSummary(result);
+}
+
+/** 取数结果的精简摘要：数组类只显示总数+前几条，避免大 JSON 灌入上下文 */
+function printDataSummary(result) {
+  const data = result?.data ?? result;
+  let c = '';
+  if (Array.isArray(data)) c = `（数组 ${data.length} 条）`;
+  else if (data && Array.isArray(data.item)) c = `（共 ${data.total ?? data.item.length} 条）`;
+  log(`取数摘要 ${c}（查看全部加 --full）`);
+  const item = Array.isArray(data) ? data : data?.item;
+  if (Array.isArray(item)) {
+    const shown = item.slice(0, 5);
+    for (const it of shown) log(`  ${JSON.stringify(it).slice(0, 240)}`);
+    if (item.length > shown.length) log(`  … 其余 ${item.length - shown.length} 条 --full 查看`);
+  } else {
+    log(`  ${JSON.stringify(data).slice(0, 1000)}`);
+  }
 }
 
 // ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today> ──
@@ -438,7 +461,7 @@ export async function main() {
     allowPositionals: true,
     options: {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
-      help: { type: 'boolean' },
+      help: { type: 'boolean' }, full: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
