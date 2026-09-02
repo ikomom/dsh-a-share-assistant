@@ -15,6 +15,7 @@
 | 本地缓存 | `.a-share-assistant/` 目录，JSON 索引 + 三档保留（近30天散装→月zip归档→超期删除）、按标的过滤、TTL 过期判定 |
 | 个股体检 | 财务三表 + 指标 + 估值 + 异动 + 新闻兜底，一票否决式排雷，结论带数据时间戳 |
 | 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进笔记库 |
+| 交易台账 | 记录本金、建仓/加仓/卖出、每笔心理备注 → `position`，AI 对话记账，复盘"操作回顾"自动引用 |
 | 先体检禁考古 | 数据任务第一步跑 `check`，链路未就绪立即停下给指引，绝不现场翻源码 |
 | 技能纯净 | 宿主注入的无关全局技能被隔离，AI 只认本插件技能 |
 | 错误自愈 | 端点参数元数据 + 必填预检 + 缺参示例命令，参数试错次数大幅下降 |
@@ -22,8 +23,9 @@
 ## 数据源与缓存
 
 - **数据源**：同花顺金融数据 API（fuyao.aicubes.cn），HTTP 直连。
-- **缓存**：系统产物（配置 + 缓存）放会话工作目录 `.a-share-assistant/`（点开头默认隐藏、git 忽略）；用户产物（复盘笔记）放会话目录可见位置。
+- **缓存**：系统产物（配置 + 缓存 + 台账）放会话工作目录 `.a-share-assistant/`（点开头默认隐藏、git 忽略）；用户产物（复盘笔记）放会话目录可见位置。
 - **API Key**：需在 https://fuyao.aicubes.cn 官网自签，填入 `.a-share-assistant/config.json` 的 `fuyao.apiKey`（**不写进代码/仓库**）。
+- **交易台账**：`.a-share-assistant/portfolio.json`（本金/每笔操作/盈亏，个人财务**敏感，留本机 git 忽略**）；复盘笔记写 `复盘/`（知识产物，进笔记库随版本管理）。
 
 ## 安装
 
@@ -62,6 +64,8 @@ DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/c
 - 「帮我看看华电辽能的情况」→ 个股体检报告
 - 「今天有什么题材值得看？」→ 盘前找方向（板块/涨停/新闻）
 - 「收盘复盘」→ 自动生成复盘笔记
+- 「记一笔：建仓茅台 100 股 1500」→ 交易台账（记录本金/操作）
+- 「今天交易了啥」→ 当日交易流水（含心理备注）
 - 「这个策略历史表现如何」→ 历史行情/财务做策略验证
 
 ### CLI 子命令
@@ -75,6 +79,11 @@ node src/cli.js cache status         # 缓存状态
 node src/cli.js cache latest --type <type> [--code X]   # 取最近缓存（--code 查个股）
 node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
                                      # 取数并可选落缓存（--kind X --help 看参数）
+node src/cli.js position init --capital N                       # 设初始本金
+node src/cli.js position add --code X --shares N --price P [--psych "心里备注"]  # 建仓/加仓（加权成本）
+node src/cli.js position sell --code X --shares N --price P     # 减仓/清仓（自动算已实现盈亏）
+node src/cli.js position psych --code X --text "复盘：这笔追高"  # 给某笔补心理备注
+node src/cli.js position list | summary | today                 # 持仓/总览/当日流水
 ```
 
 端点参数示例：`data --kind price-historical --thscode 600396.SH --interval 1d --start 2026-08-01 --end 2026-08-17`。
