@@ -59,7 +59,7 @@ DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/c
 
 - 「帮我看看华电辽能的情况」→ 个股体检报告
 - 「今天有什么题材值得看？」→ 盘前找方向（板块/涨停/新闻）
-- 「收盘复盘」→ 自动生成复盘笔记
+- 「收盘复盘」→ 自动生成复盘笔记（`daily-snapshot` 一次落盘涨停/龙虎榜/板块等）
 - 「记一笔：建仓茅台 100 股 1500」→ 交易台账（记录本金/操作）
 - 「今天交易了啥」→ 当日交易流水（含心理备注）
 - 「这个策略历史表现如何」→ 历史行情/财务做策略验证
@@ -68,6 +68,7 @@ DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/c
 
 ```bash
 node src/cli.js check                # 数据链路体检（网络/Key/端点/缓存 + 参数速查）
+node src/cli.js check --quick        # 轻量体检：只判断链路就绪（日常用，会话内复用）
 node src/cli.js config --init        # 生成配置
 node src/cli.js config --template    # 生成模板自行创建
 node src/cli.js config --status      # 查看配置状态
@@ -75,11 +76,13 @@ node src/cli.js cache status         # 缓存状态
 node src/cli.js cache latest --type <type> [--code X]   # 取最近缓存（--code 查个股）
 node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
                                      # 取数并可选落缓存（--kind X --help 看参数）
+node src/cli.js investigate --code X [--report YYYY-N]   # 一键个股体检（拉齐行情/三表/估值/异动落盘）
 node src/cli.js position init --capital N                       # 设初始本金
 node src/cli.js position add --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee [--account 名称]]  # 建仓/加仓（加权成本）
 node src/cli.js position sell --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee]  # 减仓/清仓（自动算已实现盈亏）
 node src/cli.js position psych --code X --text "复盘：这笔追高"  # 给某笔补心理备注
 node src/cli.js position list | summary | today                 # 持仓/总览/当日流水
+node src/cli.js daily-snapshot [--date D]                       # 一键每日复盘快照（涨停/龙虎榜/板块/指数等落盘）
 ```
 
 端点参数示例：`data --kind price-historical --thscode 600396.SH --interval 1d --start 2026-08-01 --end 2026-08-17`。

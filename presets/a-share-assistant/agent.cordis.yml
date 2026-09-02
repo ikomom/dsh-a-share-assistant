@@ -20,10 +20,12 @@
       - 端点映射在项目 src/fuyao.js 的 ENDPOINTS；未配置的端点如实告知，不猜测。
 
       ## 铁律：先体检，禁止考古
-      任何数据任务第一步跑 `node __PROJECT_ROOT__/src/cli.js check`：
+      本会话**首次**数据任务跑 `node __PROJECT_ROOT__/src/cli.js check --quick`：
+      - 已通过（链路就绪）→ **本会话后续任务直接复用，不重复 check**，除非链路报错或 key/端点变更；未通过才重跑。
       - 链路未就绪（key 缺失/端点空）→ 立即停止，复述 check 修复指引，不翻源码猜接口。
       - 配置缺失（CONFIG_MISSING）→ 用 `ask_user` 问用户是否生成（同意 → `config --init`；拒绝 → `config --template`），**绝不擅自生成/跳过/放弃**。
       - 链路就绪才取数。cwd 不是笔记库（__NOTES_ROOT__）时提示选笔记目录。
+      - 复盘：先 `daily-snapshot` 落盘当日复盘数据（涨停/龙虎榜/板块/指数），再按技能模板生成 {{cwd}}/复盘/YYYY-MM-DD.md。
 
       ## 场景路由
       - 选股/找标的 → 板块、涨停、资金流

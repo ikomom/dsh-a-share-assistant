@@ -306,6 +306,37 @@ async function cmdInvestigate(opts) {
   log(`  财务指标另取: data --kind financial-indicators --thscode ${code} --report YYYY-N（或用 --report 一并取）`);
 }
 
+// ── 一键每日复盘快照：node cli.js daily-snapshot [--date D] ──
+async function cmdDailySnapshot(opts) {
+  const date = opts.date || new Date().toISOString().slice(0, 10);
+  const idx = '000001.SH,399001.SZ,399006.SZ';
+  const jobs = [
+    ['limit-up', 'limit-up-pool', {}],
+    ['limit-down', 'limit-down-pool', {}],
+    ['limit-break', 'limit-break-pool', {}],
+    ['ladder', 'limit-up-ladder', {}],
+    ['dragon-tiger', 'dragon-tiger-list', {}],
+    ['hot-stock', 'hot-stock-list', { period: 'day' }],
+    ['sectors', 'ths-index-list', { tag: 'cn_concept' }],
+    ['index', 'index-price-snapshot', { thscodes: idx }],
+  ];
+  log(`每日复盘快照 ${date}：`);
+  const done = [];
+  for (const [type, kind, params] of jobs) {
+    try {
+      const r = await getData(kind, params);
+      if (r && r.code !== undefined && r.code !== 0) throw new Error(`code=${r.code} ${r.message}`);
+      const f = cache.saveSnapshot({ type, date, data: r.data ?? r });
+      done.push(type);
+      log(`  ✔ ${type.padEnd(12)} ${path.basename(f)}`);
+    } catch (e) {
+      log(`  ✗ ${type.padEnd(12)} ${e.message}`);
+    }
+  }
+  log(`  完成: ${done.join('、')}`);
+  log(`  复盘时用 cache latest --type <limit-up|dragon-tiger|sectors|hot-stock|index|...> 读取`);
+}
+
 // ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today> ──
 async function cmdPosition(argv) {
   const sub = argv._[0];
@@ -468,6 +499,7 @@ function cmdHelp() {
                             取数并可选落缓存（--save 指定缓存类型；--code 存个股级）
   investigate    --code X [--report YYYY-N]
                             一键个股体检（拉齐行情/三表/估值/异动并落盘）
+  daily-snapshot [--date D]  一键每日复盘快照（涨停/跌停/炸板/连板/龙虎榜/热榜/板块/指数落盘）
 
 data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）
@@ -524,8 +556,9 @@ export async function main() {
   if (cmd === 'cache') return cmdCache({ _: positionals.slice(1), values });
   if (cmd === 'position') return cmdPosition({ _: positionals.slice(1), values });
   if (cmd === 'investigate') return cmdInvestigate(values);
+  if (cmd === 'daily-snapshot') return cmdDailySnapshot(values);
   if (cmd === 'data') return cmdData(values);
-  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|investigate|help>（跑 help 看全部用法）');
+  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|investigate|daily-snapshot|help>（跑 help 看全部用法）');
   process.exitCode = 1;
 }
 
