@@ -40,15 +40,15 @@ if (fs.existsSync(USER_CFG)) {
 }
 
 const CACHE_ROOT = String(config.cacheRoot || path.join(path.resolve(process.env.A_SHARE_HOME || process.cwd()), '.a-share-assistant', 'cache')).replace(/\//g, path.sep);
-const VAULT_ROOT = (typeof config.vaultRoot === 'string' && config.vaultRoot.trim())
-  ? config.vaultRoot
+const NOTES_ROOT = (typeof (config.noteRoot ?? config.vaultRoot) === 'string' && (config.noteRoot ?? config.vaultRoot).trim())
+  ? (config.noteRoot ?? config.vaultRoot)
   : null; // 未配置则不替换为路径，persona 中显示"未配置"
 
 function replacer(text) {
   return text
     .replaceAll('__PROJECT_ROOT__', PROJECT_ROOT)
     .replaceAll('__CACHE_ROOT__', CACHE_ROOT)
-    .replaceAll('__VAULT_ROOT__', VAULT_ROOT || '（未配置 vaultRoot，工作目录提醒关闭）')
+    .replaceAll('__NOTES_ROOT__', NOTES_ROOT || '（未配置 noteRoot，工作目录提醒关闭）')
     .replaceAll('__PLATFORM_NOTE__', PLATFORM_NOTE)
     .replaceAll('__SKILL_MD__', path.join(DEST_DIR, 'skills', 'a-share-assistant', 'SKILL.md'));
 }
@@ -81,7 +81,7 @@ console.log(`✔ 已安装预设: ${DEST_DIR}`);
 console.log(`  项目根: ${PROJECT_ROOT}`);
 console.log(`  配置来源: ${USER_CFG}`);
 console.log(`  缓存目录: ${CACHE_ROOT}`);
-console.log(`  vault 根: ${VAULT_ROOT}`);
+console.log(`  笔记库根: ${NOTES_ROOT}`);
 console.log(`  平台: ${PLATFORM}（${PLATFORM_NOTE}）`);
 console.log('');
 console.log('支持矩阵：Windows（本机已验证）/ Linux、macOS（代码跨平台兼容，建议安装后先跑 `node src/cli.js check` 自检）');
@@ -100,7 +100,7 @@ if (configMissing) {
     if (answer === 'y' || answer === 'yes' || answer === '是') {
       console.log('→ 运行 config --init ...');
       spawnSync(process.execPath, [path.join(PROJECT_ROOT, 'src', 'cli.js'), 'config', '--init'], { stdio: 'inherit' });
-      console.log('✔ 已生成配置，请编辑 `./.a-share-assistant/config.json` 填写 vaultRoot / cacheRoot / fuyao.apiKey。');
+      console.log('✔ 已生成配置，请编辑 `./.a-share-assistant/config.json` 填写 noteRoot / cacheRoot / fuyao.apiKey。');
     } else {
       console.log('→ 请稍后运行 `node src/cli.js config --init` 或 `config --template` 创建配置。');
     }
@@ -112,3 +112,4 @@ if (configMissing) {
 console.log('');
 console.log('下一步：在 DSH Web 界面「新建会话」→ 预设选择「A股助手」，先跑 `node src/cli.js check` 自检。');
 console.log('提示：当前已打开的会话不会热切换预设，需要新建会话生效。');
+

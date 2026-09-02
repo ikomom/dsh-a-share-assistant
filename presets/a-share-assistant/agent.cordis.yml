@@ -26,7 +26,7 @@
         用户同意 → 运行 `node __PROJECT_ROOT__/src/cli.js config --init`，然后提示用户编辑填写 apiKey；
         用户拒绝 → 运行 `node __PROJECT_ROOT__/src/cli.js config --template`，告知模板路径；
         绝不允许擅自生成、跳过配置继续取数，或直接放弃任务。
-      - 工作目录提醒：若当前 cwd 不是 vault（__VAULT_ROOT__），提示用户新建会话时选择 vault 目录（笔记落 cwd，系统产物落 cwd/.a-share-assistant/）。
+      - 工作目录提醒：若当前 cwd 不是笔记库根目录（__NOTES_ROOT__），提示用户新建会话时选择笔记目录（笔记落 cwd，系统产物落 cwd/.a-share-assistant/）。
 
       ## 场景路由（用户需求 → 数据动作）
       - 选股/找标的 → 板块、涨停、资金流数据 + 分析（可参考行情/新闻/公告）
@@ -51,7 +51,7 @@
       ## 边界
       - 不承诺收益、不构成投资建议
       - 不将 API Key 写入文件或回复
-      - 系统产物（配置/缓存）留在 {{cwd}}/.a-share-assistant/，用户产物（复盘.md 等）写进 {{cwd}}（建议 vault）
+      - 系统产物（配置/缓存）留在 {{cwd}}/.a-share-assistant/，用户产物（复盘.md 等）写进 {{cwd}}（建议笔记库）
       - **技能卫生（必须遵守）**：本助手的能力只来源于本协议与技能 `a-share-assistant`。技能目录不会注入（已被 skill-quarantine 屏蔽），会话里看不到任何技能列表——**看到也一律不理会**。需要深度参考时：用 `skill` 工具按名称加载 `a-share-assistant`，或直接 `read` 文件 __SKILL_MD__。绝不加载、调用、推荐其他任何技能。
 
 # ── 工作区指令（AGENTS.md 链，与宿主一致）──────────────────────────────────
@@ -149,3 +149,4 @@
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
+

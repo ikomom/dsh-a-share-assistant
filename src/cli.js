@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS } from './fuyao.js';
 import * as cache from './cache.js';
-import { CACHE_ROOT, PROJECT_ROOT, VAULT_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
+import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
 export const CLI_VERSION = '0.1.2';
@@ -32,7 +32,7 @@ async function cmdCheck() {
     try { srcMtimes.push(fs.statSync(path.join(PROJECT_ROOT, 'src', f)).mtime.toISOString().slice(0, 19).replace('T', ' ')); } catch {}
   }
   log(`源码更新于: ${srcMtimes.join(' / ') || '未知'}`);
-  log(`vault 根: ${VAULT_ROOT || '未配置（参照提醒关闭）'}`);
+  log(`笔记库根: ${NOTES_ROOT || '未配置（参照提醒关闭）'}`);
   log(`配置来源: ${getConfigSource()}`);
   if (!isConfigPresent()) {
     log('⚠️ [CONFIG_MISSING] 未检测到用户配置文件，如需创建请运行: node src/cli.js config（交互询问）或 config --init / config --template');
@@ -290,13 +290,13 @@ async function cmdConfig(opts) {
   if (opts.init) {
     const p = writeConfigFile(USER_CONFIG_PATH);
     log(`✔ 已生成配置文件: ${p}`);
-    log('  请编辑填写 vaultRoot / cacheRoot / fuyao.apiKey（官网 https://fuyao.aicubes.cn 签发）');
+    log('  请编辑填写 noteRoot / cacheRoot / fuyao.apiKey（官网 https://fuyao.aicubes.cn 签发）');
     return;
   }
   if (opts.template) {
     const p = writeConfigFile(path.join(homeDir(), 'config.template.json'));
     log(`✔ 已生成模板: ${p}`);
-    log(`  请参照模板自行创建 ${USER_CONFIG_PATH} 并填写 vaultRoot / cacheRoot / fuyao.apiKey`);
+    log(`  请参照模板自行创建 ${USER_CONFIG_PATH} 并填写 noteRoot / cacheRoot / fuyao.apiKey`);
     return;
   }
   // 交互模式：先问用户，得到同意才生成（非 TTY 环境不尝试交互，直接给指引）
@@ -313,7 +313,7 @@ async function cmdConfig(opts) {
   const ans = await promptYesNo('是否生成配置文件？（y=直接生成 / n=生成模板由你自行创建）: ');
   if (ans === true) {
     const p = writeConfigFile(USER_CONFIG_PATH);
-    log(`✔ 已生成: ${p}，请编辑填写 vaultRoot / cacheRoot / fuyao.apiKey`);
+    log(`✔ 已生成: ${p}，请编辑填写 noteRoot / cacheRoot / fuyao.apiKey`);
   } else if (ans === false) {
     const p = writeConfigFile(path.join(homeDir(), 'config.template.json'));
     log(`✔ 已生成模板: ${p}，请参照模板自行创建 ${USER_CONFIG_PATH}`);
@@ -391,3 +391,4 @@ export async function main() {
 }
 
 main().catch((e) => fail(e.message));
+

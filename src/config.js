@@ -52,11 +52,11 @@ export const CACHE_ROOT = path.resolve(
   process.env.A_SHARE_CACHE_DIR || cfg.cacheRoot || path.join(homeDir(), 'cache')
 );
 
-// vault 根目录（仅作"参照"：判断会话 cwd 是否为笔记库，用于工作目录提醒）。
+// 笔记库根目录（仅作"参照"：判断会话 cwd 是否为笔记库，用于工作目录提醒）。
 // 笔记（用户产物）按产品原则写入会话 cwd，不走此路径。
 // 未配置时返回 null（显式未配置状态，不静默回退 cwd，避免掩盖问题）。
-export const VAULT_ROOT = (() => {
-  const v = process.env.A_SHARE_VAULT_ROOT || cfg.vaultRoot;
+export const NOTES_ROOT = (() => {
+  const v = process.env.A_SHARE_NOTE_ROOT || cfg.noteRoot || cfg.vaultRoot; // 兼容旧字段 vaultRoot
   return typeof v === 'string' && v.trim() ? path.resolve(v) : null;
 })();
 
@@ -73,3 +73,4 @@ export function getApiKey() {
 export function getWatchlist() {
   return Array.isArray(cfg.watchlist) ? cfg.watchlist : [];
 }
+

@@ -14,7 +14,7 @@
 | 数据能力 | 23 个真实端点：行情快照、历史K线、财务三表、财务指标、涨跌停/炸板池、连板天梯、龙虎榜（机构/游资）、热股榜、异动原因、集合竞价、估值、板块/概念、指数、交易日历 |
 | 本地缓存 | `.a-share-assistant/` 目录，JSON 索引 + 三档保留（近30天散装→月zip归档→超期删除）、按标的过滤、TTL 过期判定 |
 | 个股体检 | 财务三表 + 指标 + 估值 + 异动 + 新闻兜底，一票否决式排雷，结论带数据时间戳 |
-| 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进 vault |
+| 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进笔记库 |
 | 先体检禁考古 | 数据任务第一步跑 `check`，链路未就绪立即停下给指引，绝不现场翻源码 |
 | 技能纯净 | 宿主注入的无关全局技能被隔离，AI 只认本插件技能 |
 | 错误自愈 | 端点参数元数据 + 必填预检 + 缺参示例命令，参数试错次数大幅下降 |
@@ -41,7 +41,7 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 
 ```jsonc
 {
-  "vaultRoot": "你的笔记库目录，如 D:/docs/private-doc 或 ~/notes",
+  "noteRoot": "你的笔记库目录，如 D:/docs/private-doc 或 ~/notes",
   "cacheRoot": "缓存目录，默认 .a-share-assistant/cache，可留空",
   "fuyao": { "apiKey": "你的 fuyao API Key（必填）" }
 }
@@ -89,3 +89,5 @@ node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
 ## License
 
 MIT
+
+
