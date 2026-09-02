@@ -1,7 +1,5 @@
 # dsh-a-share-assistant
 
-**中文**
-
 [![Release v0.1.2](https://img.shields.io/badge/release-v0.1.2-5B4CF0?style=flat-square)](https://github.com/ikomom/dsh-a-share-assistant)
 [![Node >=18](https://img.shields.io/badge/Node-%3E%3D18-0B7285?style=flat-square)](https://nodejs.org/)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh%20plugin-5B4CF0?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
