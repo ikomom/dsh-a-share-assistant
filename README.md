@@ -76,8 +76,8 @@ node src/cli.js cache latest --type <type> [--code X]   # 取最近缓存（--co
 node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
                                      # 取数并可选落缓存（--kind X --help 看参数）
 node src/cli.js position init --capital N                       # 设初始本金
-node src/cli.js position add --code X --shares N --price P [--psych "心里备注"]  # 建仓/加仓（加权成本）
-node src/cli.js position sell --code X --shares N --price P     # 减仓/清仓（自动算已实现盈亏）
+node src/cli.js position add --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee [--account 名称]]  # 建仓/加仓（加权成本）
+node src/cli.js position sell --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee]  # 减仓/清仓（自动算已实现盈亏）
 node src/cli.js position psych --code X --text "复盘：这笔追高"  # 给某笔补心理备注
 node src/cli.js position list | summary | today                 # 持仓/总览/当日流水
 ```

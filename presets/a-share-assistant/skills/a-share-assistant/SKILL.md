@@ -98,8 +98,9 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 ```bash
 node __PROJECT_ROOT__/src/cli.js position init --capital 200000     # 设初始本金
-node __PROJECT_ROOT__/src/cli.js position add --code 600519.SH --name 贵州茅台 --shares 100 --price 1500 --date 2026-09-01 --note "计划内的主线"
-node __PROJECT_ROOT__/src/cli.js position sell --code 600519.SH --shares 50 --price 1550   # 减仓/清仓（自动算已实现盈亏）
+node __PROJECT_ROOT__/src/cli.js position add --code 600519.SH --name 贵州茅台 --shares 100 --price 1500 --date 2026-09-01 --note "计划内的主线" --fee 30
+node __PROJECT_ROOT__/src/cli.js position add --code 601318.SH --shares 200 --price 60 --auto-fee --account 券商A   # 自动按账户费率估算
+node __PROJECT_ROOT__/src/cli.js position sell --code 600519.SH --shares 50 --price 1550 --auto-fee   # 减仓/清仓（自动算已实现盈亏）
 node __PROJECT_ROOT__/src/cli.js position list      # 持仓 + 现价/市值/浮盈（拉行情）
 node __PROJECT_ROOT__/src/cli.js position summary   # 本金/市值/盈亏总览
 node __PROJECT_ROOT__/src/cli.js position today     # 当日交易流水

@@ -414,7 +414,10 @@ function cmdHelp() {
 
 data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）
-  --board-type all|org|hot_money / --page / --size / --tag cn_concept|industry
+  --interval 1d（K线必传）/ --adjust none|forward|backward / --from --to（区间日期）
+  --tag cn_concept|industry / --tag-codes LIMIT_UP,SHARP_FALL（异动标签）
+  --start-date --end-date（热榜走势日期）
+  --board-type all|org|hot_money / --page / --size / --sort-field / --sort-dir
 
   position       init --capital N | add --code X --shares N --price P
                  [--name --date --note --psych --fee N | --auto-fee [--account 名称]]
