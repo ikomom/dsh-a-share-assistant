@@ -268,16 +268,22 @@ async function cmdPosition(argv) {
       if (!o.code) fail('position add 需要 --code <代码，如 600519.SH>');
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position add 需要 --shares <股数> 与 --price <价格>');
-      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note });
-      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}`);
+      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych });
+      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
       return;
     }
     case 'sell': {
       if (!o.code) fail('position sell 需要 --code');
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position sell 需要 --shares 与 --price');
-      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note });
-      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}`);
+      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych });
+      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
+      return;
+    }
+    case 'psych': {
+      if (!o.code || !o.text) fail('position psych 需要 --code 与 --text <心理备注>');
+      const r = position.addPsychNote({ code: o.code, date: o.date, text: o.text });
+      log(`✔ 已为交易 #${r.id}（${r.code} ${r.shares}股 @${r.price} ${r.date}）添加心理备注: ${r.psych}`);
       return;
     }
     case 'list': {
@@ -299,11 +305,11 @@ async function cmdPosition(argv) {
     case 'today': {
       const t = position.dayTrades(o.date);
       log(`当日交易流水（${o.date || '今天'}）: ${t.length ? '' : '（无）'}`);
-      for (const h of t) log(`  [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${h.price}${h.realizedPnl != null ? ` 已实现 ${h.realizedPnl}` : ''}${h.note ? ' ' + h.note : ''}`);
+      for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${h.price}${h.realizedPnl != null ? ` 已实现 ${h.realizedPnl}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
       return;
     }
     default:
-      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note] | sell --code X --shares N --price P [--date --note] | list | summary | today [--date D]');
+      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note --psych] | sell --code X --shares N --price P [--date --note --psych] | psych --code X --text "心理备注" [--date D] | list | summary | today [--date D]');
   }
 }
 
@@ -420,7 +426,7 @@ export async function main() {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
       help: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
-      price: { type: 'string' }, note: { type: 'string' },
+      price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' },
       kind: { type: 'string' }, type: { type: 'string' },
       code: { type: 'string' },
       date: { type: 'string' }, 'date-ms': { type: 'string' },

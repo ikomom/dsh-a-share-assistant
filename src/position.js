@@ -20,13 +20,18 @@ export function loadPortfolio() {
   try {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
   } catch {
-    return { initialCapital: 0, positions: {}, history: [], updatedAt: null };
+    return { initialCapital: 0, positions: {}, history: [], nextId: 1, updatedAt: null };
   }
 }
 
 function savePortfolio(p) {
   const f = portfolioFile();
   ensureDir(f);
+  // 迁移：给历史遗留的无 id 交易补递增 id（保证 each 笔有 id，便于 psych/复盘引用）
+  const maxId = p.history.reduce((m, h) => Math.max(m, Number(h.id) || 0), 0);
+  let auto = maxId + 1;
+  for (const h of p.history) if (typeof h.id !== 'number') h.id = auto++;
+  ensureNextId(p);
   p.updatedAt = new Date().toISOString();
   fs.writeFileSync(f, JSON.stringify(p, null, 2));
   return f;
@@ -36,13 +41,21 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-/** 建仓 / 加仓 */
-export function addPosition({ code, name = '', shares, price, date, note = '' }) {
+/** 确保台账有递增 id：缺失/小于历史最大 id 时重置为 max+1 */
+function ensureNextId(p) {
+  const maxId = p.history.reduce((m, h) => Math.max(m, Number(h.id) || 0), 0);
+  if (typeof p.nextId !== 'number' || p.nextId <= maxId) p.nextId = maxId + 1;
+  return p.nextId;
+}
+
+/** 建仓 / 加仓（psych 为可选心理备注，如"计划内/冲动追高"） */
+export function addPosition({ code, name = '', shares, price, date, note = '', psych = '' }) {
   const p = loadPortfolio();
   if (!Number.isFinite(shares) || shares <= 0) throw new Error('股数必须为正数');
   if (!Number.isFinite(price) || price <= 0) throw new Error('价格必须为正数');
   const amount = shares * price;
   const key = String(code);
+  ensureNextId(p);
   const existing = p.positions[key];
   if (existing) {
     // 加仓：加权平均成本
@@ -61,21 +74,22 @@ export function addPosition({ code, name = '', shares, price, date, note = '' })
       openDate: date || new Date().toISOString().slice(0, 10), note,
     };
   }
-  p.history.push({ type: 'buy', code: key, name: name || key, shares, price, amount: round2(amount), date: date || new Date().toISOString().slice(0, 10), note, realizedPnl: null });
+  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares, price, amount: round2(amount), date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: null });
   savePortfolio(p);
   return p.positions[key];
 }
 
-/** 减仓 / 清仓 */
-export function sellPosition({ code, shares, price, date, note = '' }) {
+/** 减仓 / 清仓（psych 为可选心理备注，如"止损/情绪化卖出"） */
+export function sellPosition({ code, shares, price, date, note = '', psych = '' }) {
   const p = loadPortfolio();
   const key = String(code);
   const pos = p.positions[key];
   if (!pos) throw new Error(`未持有 ${key}，无法卖出`);
+  ensureNextId(p);
   if (!Number.isFinite(shares) || shares <= 0) throw new Error('股数必须为正数');
   if (shares > pos.shares) throw new Error(`卖出 ${shares} 股超过持仓 ${pos.shares} 股`);
   const realized = round2((price - pos.avgCost) * shares);
-  p.history.push({ type: 'sell', code: key, name: pos.name, shares, price, amount: round2(shares * price), date: date || new Date().toISOString().slice(0, 10), note, realizedPnl: realized });
+  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares, price, amount: round2(shares * price), date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: realized });
   pos.shares -= shares;
   pos.cost = round2(pos.cost - shares * pos.avgCost);
   if (pos.shares <= 0) {
@@ -83,6 +97,18 @@ export function sellPosition({ code, shares, price, date, note = '' }) {
   }
   savePortfolio(p);
   return { code: key, shares: pos.shares ?? 0, realizedPnl: realized, closed: !(p.positions[key]) };
+}
+
+/** 给一笔已有交易追加/更新心理备注（复盘交易心理用）。匹配 code（+date 可选），取最后一笔。 */
+export function addPsychNote({ code, date, text }) {
+  const p = loadPortfolio();
+  const key = String(code);
+  const matches = p.history.filter((h) => h.code === key && (!date || h.date === date));
+  if (!matches.length) throw new Error(`未找到 ${key}${date ? ' 在 ' + date : ''} 的交易，无法加心理备注`);
+  const target = matches[matches.length - 1];
+  target.psych = text;
+  savePortfolio(p);
+  return { id: target.id, code: target.code, shares: target.shares, price: target.price, date: target.date, psych: target.psych };
 }
 
 /** 设初始本金 */
