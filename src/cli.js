@@ -416,6 +416,13 @@ data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）
   --board-type all|org|hot_money / --page / --size / --tag cn_concept|industry
 
+  position       init --capital N | add --code X --shares N --price P
+                 [--name --date --note --psych --fee N | --auto-fee [--account 名称]]
+                 | sell --code X --shares N --price P [--date --psych --fee|--auto-fee]
+                 | psych --code X --text "..." [--date D] | list | summary | today [--date D]
+position 参数: --fee 手续费（买入计入成本/卖出从已实现盈亏扣）；--auto-fee 按费率自动估算；
+  --account <账户> 用配置 feeProfiles 的对应费率（多账户）；--psych 心理备注；--name 名称
+
 可用端点:`);
   for (const [kind, spec] of Object.entries(ENDPOINTS)) {
     log(`  ${kind.padEnd(24)} ${spec.note}`);
