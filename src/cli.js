@@ -8,6 +8,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS } from './fuyao.js';
 import * as cache from './cache.js';
 import * as position from './position.js';
+import { formatYuan, toCents } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
@@ -347,7 +348,7 @@ async function cmdPosition(argv) {
     case 'init': {
       const c = num(o.capital);
       if (!Number.isFinite(c) || c <= 0) fail('position init 需要 --capital <初始本金（正数）>');
-      log(`✔ 初始本金已设: ${position.setCapital(c)}`);
+      log(`✔ 初始本金已设: ${formatYuan(position.setCapital(c))}`);
       return;
     }
     case 'add':
@@ -356,9 +357,9 @@ async function cmdPosition(argv) {
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position add 需要 --shares <股数> 与 --price <价格>');
       let feeVal = num(o.fee);
-      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account });
+      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = formatYuan(position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account }));
       const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal });
-      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${pos.avgCost}${feeVal ? `（手续费${feeVal}）` : ''}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
+      log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${formatYuan(pos.avgCost)}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
       return;
     }
     case 'sell': {
@@ -366,41 +367,59 @@ async function cmdPosition(argv) {
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position sell 需要 --shares 与 --price');
       let feeVal = num(o.fee);
-      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'sell', shares: s, price: pr, account: o.account });
+      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = formatYuan(position.estimateFee({ side: 'sell', shares: s, price: pr, account: o.account }));
       const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal });
-      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${r.realizedPnl}${r.closed ? '（已清仓）' : ''}${feeVal ? `（手续费${feeVal}）` : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
+      log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${formatYuan(r.realizedPnl)}${r.closed ? '（已清仓）' : ''}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
       return;
     }
     case 'psych': {
       if (!o.code || !o.text) fail('position psych 需要 --code 与 --text <心理备注>');
       const r = position.addPsychNote({ code: o.code, date: o.date, text: o.text });
-      log(`✔ 已为交易 #${r.id}（${r.code} ${r.shares}股 @${r.price} ${r.date}）添加心理备注: ${r.psych}`);
+      log(`✔ 已为交易 #${r.id}（${r.code} ${r.shares}股 @${formatYuan(r.price)} ${r.date}）添加心理备注: ${r.psych}`);
+      return;
+    }
+    case 'reset': {
+      if (!o.yes) fail('position reset 会清空台账（本金/持仓/历史全部），确认加 --yes');
+      const file = position.resetPortfolio();
+      log(`✔ 台账已清空: ${file}（可用 position import 反向重建）`);
+      return;
+    }
+    case 'import': {
+      let arr;
+      try {
+        arr = o.file ? JSON.parse(fs.readFileSync(o.file, 'utf8')) : JSON.parse(o.data);
+      } catch (e) { fail(`import 读取失败（--file 指向 JSON 文件或 --data 传 JSON 数组）: ${e.message}`); }
+      if (!Array.isArray(arr)) fail('import 需要 JSON 数组 [{type:"buy|sell", code, shares, price, fee?, date?, note?}, ...]');
+      const r = position.importTrades(arr);
+      const cap = position.setCapital(formatYuan(r.netInvestC)); // 净投入作为初始本金（分）
+      log(`✔ 已导入 ${r.count} 笔交易，净投入 ${formatYuan(cap)} 元 —— 已设为初始本金（如需调整用 position init）`);
+      log(`  数据已按"分"精确记录；之后可继续用 add/sell 正向补记。`);
       return;
     }
     case 'list': {
       const r = await position.listPositions();
-      log(`持仓列表（初始本金 ${r.initialCapital}）:`);
+      log(`持仓列表（初始本金 ${formatYuan(r.initialCapital)}）:`);
       if (!r.rows.length) { log('  （暂无持仓，用 position add 建仓）'); return; }
       for (const x of r.rows) {
-        log(`  ${x.code.padEnd(10)} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${x.avgCost} 现价${x.price} 市值${x.marketValue} 盈亏${x.pnl}(${x.pnlPct}%)`);
+        log(`  ${x.code.padEnd(10)} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatYuan(x.price)} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
       }
       return;
     }
     case 'summary': {
       const s = await position.summary();
       log('持仓总览:');
-      log(`  持仓数 ${s.positionCount} | 本金 ${s.initialCapital} | 投入成本 ${s.totalCost}`);
-      log(`  市值 ${s.marketValue} | 浮动盈亏 ${s.floatPnl} | 已实现 ${s.realizedPnl} | 合计 ${s.totalPnl}`);
+      log(`  持仓数 ${s.positionCount} | 本金 ${formatYuan(s.initialCapital)} | 投入成本 ${formatYuan(s.totalCostC)}`);
+      log(`  市值 ${formatYuan(s.marketValueC)} | 浮动盈亏 ${formatYuan(s.floatPnl)} | 已实现 ${formatYuan(s.realizedPnl)} | 合计 ${formatYuan(s.totalPnl)}`);
       return;
     }
     case 'today': {
       const t = position.dayTrades(o.date);
       log(`当日交易流水（${o.date || '今天'}）: ${t.length ? '' : '（无）'}`);
-      for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${h.price}${h.fee ? ` 手续费${h.fee}` : ''}${h.realizedPnl != null ? ` 已实现 ${h.realizedPnl}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
+      for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${formatYuan(h.price)}${h.fee ? ` 手续费${formatYuan(h.fee)}` : ''}${h.realizedPnl != null ? ` 已实现 ${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
       return;
     }
     default:
-      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note --psych] | sell --code X --shares N --price P [--date --note --psych] | psych --code X --text "心理备注" [--date D] | list | summary | today [--date D]');
+      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note --psych --fee N | --auto-fee [--account 名称]] | sell ... | psych --code X --text "..." | import --file trades.json（反向录入，自动建初始本金） | list | summary | today [--date D]');
   }
 }
 
@@ -530,6 +549,7 @@ export async function main() {
     options: {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
       help: { type: 'boolean' }, full: { type: 'boolean' }, quick: { type: 'boolean' }, summary: { type: 'boolean' },
+      yes: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },

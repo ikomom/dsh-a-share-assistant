@@ -112,7 +112,12 @@ node __PROJECT_ROOT__/src/cli.js position sell --code 600519.SH --shares 50 --pr
 node __PROJECT_ROOT__/src/cli.js position list      # 持仓 + 现价/市值/浮盈（拉行情）
 node __PROJECT_ROOT__/src/cli.js position summary   # 本金/市值/盈亏总览
 node __PROJECT_ROOT__/src/cli.js position today     # 当日交易流水
+node __PROJECT_ROOT__/src/cli.js position import --file trades.json   # 反向录入：批量导入历史交易，自动按净投入设初始本金
+node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台账（重建前用）
 ```
+
+**精度**：所有金额/价格/手续费/盈亏内部按"分"（整数）计算，显示为两位元——无 JS 浮点误差（如 0.1+0.2 不会是 0.3000004）。
+**反向录入**：用户给出"今天到之前一段交易"（`[{type:'buy'|'sell', code, shares, price, fee?, date?, note?}, ...]`）用 `position import` 一次录齐并自动设初始本金（净投入），之后正常补记。
 
 **手续费**：`--fee` 记录交易手续费——买入计入持仓成本、卖出从已实现盈亏扣除；不填则按 0。
 **自动费率**：`--auto-fee` 按配置里的 `feeProfiles` 自动估算（默认：佣金万2.5、最低5元、印花税0.05%卖出、过户费0.001%双向）。**多账户**：在 `.a-share-assistant/config.json` 的 `feeProfiles` 加多个费率（如 `"券商A": {...}`、`"券商B": {...}`），用 `--account 券商A` 切换；`default` 为缺省。
