@@ -125,13 +125,21 @@ export function estimateFee({ side, shares, price, account }) {
   return commissionC + transferC + stampC;
 }
 
+/** 裸代码 → 带交易所后缀（行情接口要求），如 600900→600900.SH、000983→000983.SZ */
+function toThscode(code) {
+  const c = String(code).replace(/[^0-9]/g, '');
+  if (/^(60|68)/.test(c)) return c + '.SH';
+  if (/^(00|30)/.test(c)) return c + '.SZ';
+  return c;
+}
+
 async function fetchPrices(codes) {
   if (!codes.length) return {};
   try {
-    const res = await getData('price-snapshot', { thscodes: codes.join(',') });
+    const res = await getData('price-snapshot', { thscodes: codes.map(toThscode).join(',') });
     const item = res?.data?.item ?? [];
     const map = {};
-    for (const it of item) map[String(it.thscode || it.ticker)] = toCents(Number(it.last_price) || 0);
+    for (const it of item) map[String(it.ticker || it.thscode)] = toCents(Number(it.last_price) || 0);
     return map;
   } catch {
     return {};
