@@ -58,7 +58,7 @@ export function toThscode(code) {
 }
 
 /** 建仓 / 加仓（fee/price 按"元"传入，内部转分） */
-export function addPosition({ code, name = '', shares, price, date, note = '', psych = '', fee = 0, account }) {
+export function addPosition({ code, name = '', shares, price, date, time = '', note = '', psych = '', fee = 0, account }) {
   const p = loadPortfolio(account);
   const sh = Math.floor(Number(shares));
   if (!Number.isFinite(sh) || sh <= 0) throw new Error('股数必须为正数');
@@ -86,13 +86,13 @@ export function addPosition({ code, name = '', shares, price, date, note = '', p
       openDate: date || new Date().toISOString().slice(0, 10), note,
     };
   }
-  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares: sh, price: priceC, amount: amountC, fee: feeC, date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: null });
+  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares: sh, price: priceC, amount: amountC, fee: feeC, date: date || new Date().toISOString().slice(0, 10), time, note, psych, realizedPnl: null });
   savePortfolio(p, account);
   return p.positions[key];
 }
 
 /** 减仓 / 清仓 */
-export function sellPosition({ code, shares, price, date, note = '', psych = '', fee = 0, account }) {
+export function sellPosition({ code, shares, price, date, time = '', note = '', psych = '', fee = 0, account }) {
   const p = loadPortfolio(account);
   const key = String(code);
   const pos = p.positions[key];
@@ -103,7 +103,7 @@ export function sellPosition({ code, shares, price, date, note = '', psych = '',
   const priceC = toCents(price);
   const feeC = toCents(fee);
   const realizedC = Math.round((priceC - Number(pos.avgCost)) * sh) - feeC;
-  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares: sh, price: priceC, amount: priceC * sh, fee: feeC, date: date || new Date().toISOString().slice(0, 10), note, psych, realizedPnl: realizedC });
+  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares: sh, price: priceC, amount: priceC * sh, fee: feeC, date: date || new Date().toISOString().slice(0, 10), time, note, psych, realizedPnl: realizedC });
   pos.shares -= sh;
   pos.cost = Number(pos.cost) - Math.round(Number(pos.avgCost) * sh);
   if (pos.shares <= 0) delete p.positions[key];
@@ -241,15 +241,15 @@ export function addPsychNote({ code, date, text, account }) {
 
 /** 批量导入交易（反向录入）：按 date 升序执行 buy/sell；netInvestC=净投入（分） */
 export function importTrades(trades, account) {
-  const sorted = [...trades].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  const sorted = [...trades].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.time || '').localeCompare(String(b.time || '')));
   let netInvestC = 0, count = 0;
   for (const t of sorted) {
     const type = (t.type || 'buy').toLowerCase();
     if (type === 'buy') {
-      addPosition({ code: t.code, name: t.name, shares: t.shares, price: t.price, fee: t.fee, date: t.date, note: t.note, psych: t.psych, account });
+      addPosition({ code: t.code, name: t.name, shares: t.shares, price: t.price, fee: t.fee, date: t.date, time: t.time, note: t.note, psych: t.psych, account });
       netInvestC += (toCents(t.price) * t.shares) + toCents(t.fee);
     } else if (type === 'sell') {
-      sellPosition({ code: t.code, shares: t.shares, price: t.price, fee: t.fee, date: t.date, note: t.note, psych: t.psych, account });
+      sellPosition({ code: t.code, shares: t.shares, price: t.price, fee: t.fee, date: t.date, time: t.time, note: t.note, psych: t.psych, account });
       netInvestC -= (toCents(t.price) * t.shares) - toCents(t.fee);
     }
     count++;

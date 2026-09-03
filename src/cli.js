@@ -361,7 +361,7 @@ async function cmdPositionQuery(o) {
   const sorted = [...hs].sort((a, b) => sortKey === 'amount' ? (b.amount - a.amount) : sortKey === 'pnl' ? ((Number(b.realizedPnl) || 0) - (Number(a.realizedPnl) || 0)) : String(a.date).localeCompare(String(b.date)));
   const shown = sorted.slice(0, o.limit ? Number(o.limit) : 30);
   log(`明细 (${hs.length} 条，排序 ${sortKey})${hs.length > shown.length ? '，--limit 控制' : ''}:`);
-  for (const h of shown) log(`  [#${h.id}] ${h.date} ${h.code} ${h.type} ${h.shares}股 @${formatYuan(h.price)} 费${formatYuan(h.fee)}${h.realizedPnl != null ? ` 已实现${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理:${h.psych}` : ''}`);
+  for (const h of shown) log(`  [#${h.id}] ${h.date}${h.time ? ' ' + h.time : ''} ${h.code} ${h.type} ${h.shares}股 @${formatYuan(h.price)} 费${formatYuan(h.fee)}${h.realizedPnl != null ? ` 已实现${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理:${h.psych}` : ''}`);
   if (o.group) {
     const g = {};
     for (const h of hs) { const k = o.group === 'month' ? h.date.slice(0, 7) : h.code; g[k] = g[k] || { b: 0, s: 0, ba: 0, sa: 0, r: 0 }; const x = g[k]; if (h.type === 'buy') { x.b++; x.ba += Number(h.amount); } else { x.s++; x.sa += Number(h.amount); x.r += (Number(h.realizedPnl) || 0); } }
@@ -459,7 +459,7 @@ async function cmdPosition(argv) {
     case 'today': {
       const t = position.dayTrades(o.date, o.account);
       log(`当日交易流水（${o.date || '今天'}）: ${t.length ? '' : '（无）'}`);
-      for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${formatYuan(h.price)}${h.fee ? ` 手续费${formatYuan(h.fee)}` : ''}${h.realizedPnl != null ? ` 已实现 ${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
+      for (const h of t) log(`  [#${h.id ?? '-'}] ${h.date}${h.time ? ' ' + h.time : ''} [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${formatYuan(h.price)}${h.fee ? ` 手续费${formatYuan(h.fee)}` : ''}${h.realizedPnl != null ? ` 已实现 ${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
       return;
     }
     case 'query': {
