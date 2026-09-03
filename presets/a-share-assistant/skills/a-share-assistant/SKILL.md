@@ -124,6 +124,7 @@ node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台
 - **现金/逆回购**：`position cash --amount N` 记录现金/逆回购余额；`summary` 的**总资产 = 股票市值 + 现金**（可贴近券商账户）。
 - **除息调整**：`position adjust --code X` 按**持有期内**分红下调成本（浮盈更贴合券商；持有前分红不调）。
 - **自动备份**：每次写入前自动存 `.bak`，防误删/损坏。
+- **高级查询**：`position query [--code X --from D --to D --type buy|sell --only profit|loss --sort date|amount|pnl --limit N --group code|month]`——多维度筛选 + 统计（买入/卖出笔数金额/手续费/已实现盈亏）+ 明细 + 聚合（按标的/月度）。对账、复盘、识别亏损来源很实用。
 
 **手续费**：`--fee` 记录交易手续费——买入计入持仓成本、卖出从已实现盈亏扣除；不填则按 0。
 **自动费率**：`--auto-fee` 按配置里的 `feeProfiles` 自动估算（默认：佣金万2.5、最低5元、印花税0.05%卖出、过户费0.001%双向）。**多账户**：在 `.a-share-assistant/config.json` 的 `feeProfiles` 加多个费率（如 `"券商A": {...}`、`"券商B": {...}`），用 `--account 券商A` 切换；`default` 为缺省。

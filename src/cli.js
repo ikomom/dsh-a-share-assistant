@@ -337,7 +337,39 @@ async function cmdDailySnapshot(opts) {
   log(`  复盘时用 cache latest --type <limit-up|dragon-tiger|sectors|hot-stock|index|...> 读取`);
 }
 
-// ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today> ──
+// ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today|query> ──
+// 多维度高级查询：--code 标的 / --from --to 区间 / --type buy|sell / --only profit|loss
+//            --sort date|amount|pnl / --limit N / --group code|month
+async function cmdPositionQuery(o) {
+  const p = position.loadPortfolio(o.account);
+  let hs = p.history;
+  if (o.code) hs = hs.filter((h) => String(h.code) === String(o.code));
+  if (o.from) hs = hs.filter((h) => h.date >= o.from);
+  if (o.to) hs = hs.filter((h) => h.date <= o.to);
+  if (o.type) hs = hs.filter((h) => h.type === o.type);
+  if (o.only) hs = hs.filter((h) => (o.only === 'profit' ? (h.realizedPnl ?? 0) > 0 : o.only === 'loss' ? (h.realizedPnl ?? 0) < 0 : true));
+  const buys = hs.filter((h) => h.type === 'buy');
+  const sells = hs.filter((h) => h.type === 'sell');
+  const buyAmt = buys.reduce((s, h) => s + Number(h.amount), 0);
+  const buyFee = buys.reduce((s, h) => s + Number(h.fee), 0);
+  const sellAmt = sells.reduce((s, h) => s + Number(h.amount), 0);
+  const sellFee = sells.reduce((s, h) => s + Number(h.fee), 0);
+  const realized = sells.reduce((s, h) => s + (Number(h.realizedPnl) || 0), 0);
+  log(`筛选: ${o.code ? '标的 ' + o.code : '全部'}${o.from ? ' 从' + o.from : ''}${o.to ? ' 至' + o.to : ''}${o.type ? ' 类型' + o.type : ''}${o.only ? ' 仅' + o.only : ''}`);
+  log(`统计: 买 ${buys.length} 笔 额${formatYuan(buyAmt)} 费${formatYuan(buyFee)} | 卖 ${sells.length} 笔 额${formatYuan(sellAmt)} 费${formatYuan(sellFee)} | 已实现 ${formatYuan(realized)}`);
+  const sortKey = o.sort || 'date';
+  const sorted = [...hs].sort((a, b) => sortKey === 'amount' ? (b.amount - a.amount) : sortKey === 'pnl' ? ((Number(b.realizedPnl) || 0) - (Number(a.realizedPnl) || 0)) : String(a.date).localeCompare(String(b.date)));
+  const shown = sorted.slice(0, o.limit ? Number(o.limit) : 30);
+  log(`明细 (${hs.length} 条，排序 ${sortKey})${hs.length > shown.length ? '，--limit 控制' : ''}:`);
+  for (const h of shown) log(`  [#${h.id}] ${h.date} ${h.code} ${h.type} ${h.shares}股 @${formatYuan(h.price)} 费${formatYuan(h.fee)}${h.realizedPnl != null ? ` 已实现${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理:${h.psych}` : ''}`);
+  if (o.group) {
+    const g = {};
+    for (const h of hs) { const k = o.group === 'month' ? h.date.slice(0, 7) : h.code; g[k] = g[k] || { b: 0, s: 0, ba: 0, sa: 0, r: 0 }; const x = g[k]; if (h.type === 'buy') { x.b++; x.ba += Number(h.amount); } else { x.s++; x.sa += Number(h.amount); x.r += (Number(h.realizedPnl) || 0); } }
+    log(`聚合(by ${o.group}):`);
+    for (const k in g) log(`  ${k}: 买${g[k].b} 卖${g[k].s} 净额${formatYuan(g[k].sa - g[k].ba)} 已实现${formatYuan(g[k].r)}`);
+  }
+}
+
 async function cmdPosition(argv) {
   const sub = argv._[0];
   const o = argv.values;
@@ -430,8 +462,11 @@ async function cmdPosition(argv) {
       for (const h of t) log(`  [#${h.id ?? '-'}] [${h.type}] ${h.code} ${h.name} ${h.shares}股 @${formatYuan(h.price)}${h.fee ? ` 手续费${formatYuan(h.fee)}` : ''}${h.realizedPnl != null ? ` 已实现 ${formatYuan(h.realizedPnl)}` : ''}${h.psych ? ` 心理: ${h.psych}` : ''}${h.note ? ' ' + h.note : ''}`);
       return;
     }
+    case 'query': {
+      return cmdPositionQuery(o);
+    }
     default:
-      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note --psych --fee N | --auto-fee [--account 名称]] | sell ... | psych --code X --text "..." | adjust --code X（除息复权成本调整） | cash --amount N（现金/逆回购） | import --file trades.json | reset --yes | list | summary | today [--date D]');
+      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note --psych --fee N | --auto-fee [--account 名称]] | sell ... | psych --code X --text "..." | adjust --code X（除息复权成本调整） | cash --amount N（现金/逆回购） | import --file trades.json | reset --yes | list | summary | today [--date D] | query [--code X --from D --to D --type buy|sell --only profit|loss --sort date|amount|pnl --limit N --group code|month]');
   }
 }
 
@@ -548,6 +583,8 @@ data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
                  | cash --amount N（现金/逆回购）| import --file F | reset --yes | list | summary | today [--date D]
 position 参数: --fee 手续费（买入计入成本/卖出从已实现盈亏扣）；--auto-fee 按费率自动估算；
   --account <账户> 用配置 feeProfiles 的对应费率（多账户）；--psych 心理备注；--name 名称
+  query      多维度查询：--code X --from D --to D --type buy|sell --only profit|loss
+             --sort date|amount|pnl --limit N --group code|month（含统计/明细/聚合）
 
 可用端点:`);
   for (const [kind, spec] of Object.entries(ENDPOINTS)) {
@@ -566,6 +603,8 @@ export async function main() {
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' }, amount: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
+      from: { type: 'string' }, to: { type: 'string' }, sort: { type: 'string' },
+      group: { type: 'string' }, only: { type: 'string' },
       kind: { type: 'string' }, type: { type: 'string' },
       code: { type: 'string' },
       date: { type: 'string' }, 'date-ms': { type: 'string' },
