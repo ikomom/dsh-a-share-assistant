@@ -250,12 +250,13 @@ async function cmdData(opts) {
     }
     return;
   }
-  // 默认只打印摘要以节省上下文 token；--full 才全量输出
-  if (opts.full) {
-    console.log(JSON.stringify(result, null, 2));
+  // 契约：data 默认 stdout 输出纯 JSON（可被 JSON.parse）。
+  // 要省 token 用 --summary（人读摘要）或 --save（落盘不打印）。--full 兼容保留（=默认）。
+  if (opts.summary) {
+    printDataSummary(result);
     return;
   }
-  printDataSummary(result);
+  console.log(JSON.stringify(result, null, 2));
 }
 
 /** 取数结果的精简摘要：数组类只显示总数+前几条，避免大 JSON 灌入上下文 */
@@ -495,8 +496,9 @@ function cmdHelp() {
                             取指定日期快照
   cache clean    [--keep-days N]
                             清理归档（默认近30天保留）
-  data           --kind K [参数] [--save T [--code X] [--date D]]
-                            取数并可选落缓存（--save 指定缓存类型；--code 存个股级）
+  data           --kind K [参数] [--save T [--code X] [--date D] | --summary]
+                            取数并可选落缓存（--save 指定缓存类型；--code 存个股级）。
+                            默认输出完整 JSON；--summary 只出简化摘要，--save 落盘不打印（省 token）
   investigate    --code X [--report YYYY-N]
                             一键个股体检（拉齐行情/三表/估值/异动并落盘）
   daily-snapshot [--date D]  一键每日复盘快照（涨停/跌停/炸板/连板/龙虎榜/热榜/板块/指数落盘）
@@ -527,7 +529,7 @@ export async function main() {
     allowPositionals: true,
     options: {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
-      help: { type: 'boolean' }, full: { type: 'boolean' }, quick: { type: 'boolean' },
+      help: { type: 'boolean' }, full: { type: 'boolean' }, quick: { type: 'boolean' }, summary: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
