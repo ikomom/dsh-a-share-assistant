@@ -33,7 +33,18 @@ export function loadPortfolio(account) {
 function savePortfolio(p, account) {
   const f = portfolioFile(account);
   ensureDir(f);
-  if (fs.existsSync(f)) fs.copyFileSync(f, f + '.bak'); // 写前自动备份最近一份
+  if (fs.existsSync(f)) {
+    fs.copyFileSync(f, f + '.bak'); // 最近一份备份
+    // 每日独立快照（backup/portfolio-YYYYMMDD.json），保留最近 30 份
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const snapDir = path.join(path.dirname(f), 'backup');
+    fs.mkdirSync(snapDir, { recursive: true });
+    const snap = path.join(snapDir, path.basename(f).replace(/\.json$/, `-${day}.json`));
+    if (!fs.existsSync(snap)) fs.copyFileSync(f, snap);
+    // 清理：backup 里只保留最近 30 份
+    const snaps = fs.readdirSync(snapDir).filter((x) => x.endsWith('.json')).sort().reverse();
+    for (const old of snaps.slice(30)) fs.rmSync(path.join(snapDir, old), { force: true });
+  }
   const maxId = p.history.reduce((m, h) => Math.max(m, Number(h.id) || 0), 0);
   let auto = maxId + 1;
   for (const h of p.history) if (typeof h.id !== 'number') h.id = auto++;
