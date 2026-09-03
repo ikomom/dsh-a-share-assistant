@@ -3,25 +3,30 @@ import { FUYAO_BASE, getApiKey, getConfigSource } from './config.js';
 
 const TIMEOUT_MS = 15000;
 
-export async function fetchJson(url, { headers = {}, timeoutMs = TIMEOUT_MS, method = 'GET' } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: { accept: 'application/json', ...headers },
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url}`);
-    const text = await res.text();
+export async function fetchJson(url, { headers = {}, timeoutMs = TIMEOUT_MS, method = 'GET', maxRetry = 2, retryDelayMs = 300 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return JSON.parse(text);
-    } catch {
-      return text;
+      const res = await fetch(url, {
+        method,
+        headers: { accept: 'application/json', ...headers },
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const text = await res.text();
+        try { return JSON.parse(text); } catch { return text; }
+      }
+      throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url}`);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < maxRetry) await new Promise((r) => setTimeout(r, retryDelayMs * (attempt + 1)));
+    } finally {
+      clearTimeout(timer);
     }
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastErr;
 }
 
 /** 连通性检测：能调通 fuyao 站点即视为网络可用 */
