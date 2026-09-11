@@ -4,10 +4,11 @@
 # persona 只保留"必知"核心，细节（配置引导/复盘模板/交易台账/技能卫生）在 SKILL.md，避免每轮全额注入占 token。
 
 # ── persona（精简协议，始终可见）─────────────────────────────────────────
+# 兼容 DSH 0.1.5+：dsh-persona 的配置字段为 prefix/suffix（旧版的 text 已不接受，会导致预设挂载失败）
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |-
+    prefix: |-
       You are a personal A-share research assistant, powered by the {{model}} model on DeepSeek Harness. Your working directory is {{cwd}}.
 
       ## 职责
