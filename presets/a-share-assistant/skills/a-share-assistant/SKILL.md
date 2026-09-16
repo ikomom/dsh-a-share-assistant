@@ -121,7 +121,9 @@ node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台
 
 **进阶**：
 - **多账户**：`--account 名称` 隔离持仓/本金（`portfolio.<名称>.json`），费率与 `feeProfiles` 联动。
-- **现金/逆回购**：`position cash --amount N` 记录现金/逆回购余额；`summary` 的**总资产 = 股票市值 + 现金**（可贴近券商账户）。
+- **ETF**：与股票同法记账（代码如 `510300`）；行情自动走场内基金接口（A股快照不支持 ETF），列表标 `[ETF]`。
+- **现金**：`position cash --amount N` 记录现金余额。
+- **逆回购**：`position repo add --amount N --rate R [--days D] [--code 204001]` 记录（年化利率%，到期收益按 `金额×利率×天数/365` 精确到分）；`repo list [--all]` 查看；`repo settle --id N` 结算（本金+收益回笼现金）。`summary` 的**总资产 = 证券市值 + 现金 + 未结算逆回购本金**。
 - **除息调整**：`position adjust --code X` 按**持有期内**分红下调成本（浮盈更贴合券商；持有前分红不调）。
 - **自动备份**：写入时自动存最近一份 `.bak` + `backup/` 每日快照（保留最近 30 天），任一天可回溯，防误删/损坏。
 - **高级查询**：`position query [--code X --from D --to D --type buy|sell --only profit|loss --sort date|amount|pnl --limit N --group code|month]`——多维度筛选 + 统计（买入/卖出笔数金额/手续费/已实现盈亏）+ 明细 + 聚合（按标的/月度）。对账、复盘、识别亏损来源很实用。

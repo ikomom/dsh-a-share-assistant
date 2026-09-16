@@ -387,7 +387,8 @@ async function cmdPosition(argv) {
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position add 需要 --shares <股数> 与 --price <价格>');
       let feeVal = num(o.fee);
-      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = formatYuan(position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account }));
+      // estimateFee 返回「分」；addPosition 的 fee 入参是「元」（内部 toCents），故先 /100 转元
+      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account }) / 100;
       const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal, account: o.account });
       log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${formatYuan(pos.avgCost)}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
       return;
@@ -397,7 +398,8 @@ async function cmdPosition(argv) {
       const s = num(o.shares), pr = num(o.price);
       if (!Number.isFinite(s) || !Number.isFinite(pr)) fail('position sell 需要 --shares 与 --price');
       let feeVal = num(o.fee);
-      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = formatYuan(position.estimateFee({ side: 'sell', shares: s, price: pr, account: o.account }));
+      // 同上：estimateFee 返回「分」，先 /100 转成「元」再传
+      if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'sell', shares: s, price: pr, account: o.account }) / 100;
       const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal, account: o.account });
       log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${formatYuan(r.realizedPnl)}${r.closed ? '（已清仓）' : ''}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
       return;
@@ -418,7 +420,26 @@ async function cmdPosition(argv) {
     case 'cash': {
       if (o.amount === undefined) fail('position cash 需要 --amount <现金/逆回购余额，元>');
       const c = position.setCash(o.amount, o.account);
-      log(`✔ 已记录现金/逆回购: ${formatYuan(c)} 元`);
+      log(`✔ 已记录现金: ${formatYuan(c)} 元`);
+      return;
+    }
+    case 'repo': {
+      const act = argv._[1] || 'list';
+      if (act === 'add') {
+        if (o.amount === undefined || o.rate === undefined) fail('position repo add 需要 --amount <元> --rate <年化%> [--days 1] [--code 204001] [--date D]');
+        const r = position.addRepo({ code: o.code, amount: o.amount, rate: o.rate, days: o.days || 1, date: o.date, note: o.note, account: o.account });
+        log(`✔ 已记逆回购 #${r.id} ${r.code} ${formatYuan(r.amountC)} 元 @${r.rate}% ${r.days}天，到期 ${r.dueDate}，预期收益 ${formatYuan(r.interestC)}`);
+        return;
+      }
+      if (act === 'settle') {
+        if (!o.id) fail('position repo settle 需要 --id <逆回购编号>');
+        const r = position.settleRepo({ id: o.id, account: o.account });
+        log(`✔ 已结算逆回购 #${r.id}：本金 ${formatYuan(r.amountC)} + 收益 ${formatYuan(r.interestC)} 已回笼现金`);
+        return;
+      }
+      const rs = position.listRepos(o.account, { all: !!o.all });
+      log(`逆回购${o.all ? '（全部）' : '（未结算）'}: ${rs.length ? '' : '（无）'}`);
+      for (const x of rs) log(`  [#${x.id}] ${x.code} ${formatYuan(x.amountC)} 元 @${x.rate}% ${x.days}天 ${x.date}→${x.dueDate} 预期收益${formatYuan(x.interestC)}${x.settled ? ' 已结算' : ''}`);
       return;
     }
     case 'reset': {
@@ -444,7 +465,7 @@ async function cmdPosition(argv) {
       log(`持仓列表（初始本金 ${formatYuan(r.initialCapital)}${r.cash ? ` | 现金 ${formatYuan(r.cash)}` : ''}）:`);
       if (!r.rows.length) { log('  （暂无持仓，用 position add 建仓）'); return; }
       for (const x of r.rows) {
-        log(`  ${x.code.padEnd(10)} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatYuan(x.price)} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
+        log(`  ${x.code.padEnd(10)} ${(position.assetTypeOf(x.code) === 'etf' ? '[ETF]' : '     ')} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatYuan(x.price)} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
       }
       return;
     }
@@ -452,7 +473,8 @@ async function cmdPosition(argv) {
       const s = await position.summary(o.account);
       log('持仓总览:');
       log(`  持仓数 ${s.positionCount} | 本金 ${formatYuan(s.initialCapital)} | 投入成本 ${formatYuan(s.totalCostC)}`);
-      log(`  股票市值 ${formatYuan(s.marketValueC)} | 现金 ${formatYuan(s.cash)} | 总资产 ${formatYuan(s.totalAssetsC)}`);
+      log(`  证券市值 ${formatYuan(s.marketValueC)} | 现金 ${formatYuan(s.cash)} | 总资产 ${formatYuan(s.totalAssetsC)}`);
+      if (s.repoCount) log(`  逆回购 ${s.repoCount} 笔 占用 ${formatYuan(s.repoPrincipalC)} | 预期收益 ${formatYuan(s.repoInterestC)} | 已结算累计收益 ${formatYuan(s.repoPnlC)}`);
       log(`  浮动盈亏 ${formatYuan(s.floatPnl)} | 已实现 ${formatYuan(s.realizedPnl)} | 合计盈亏 ${formatYuan(s.totalPnl)}`);
       return;
     }
@@ -466,7 +488,7 @@ async function cmdPosition(argv) {
       return cmdPositionQuery(o);
     }
     default:
-      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --note --psych --fee N | --auto-fee [--account 名称]] | sell ... | psych --code X --text "..." | adjust --code X（除息复权成本调整） | cash --amount N（现金/逆回购） | import --file trades.json | reset --yes | list | summary | today [--date D] | query [--code X --from D --to D --type buy|sell --only profit|loss --sort date|amount|pnl --limit N --group code|month]');
+      fail('position 支持: init --capital N | add --code X --shares N --price P [--name --date --time --note --psych --fee N | --auto-fee [--account 名称]] | sell ... | psych --code X --text "..." | adjust --code X（除息复权） | cash --amount N（现金） | repo add --amount N --rate R [--days D]（逆回购）/ repo list / repo settle --id N | import --file trades.json | reset --yes | list | summary | today [--date D] | query [--code X --from D --to D --type buy|sell --only profit|loss --sort date|amount|pnl --limit N --group code|month]');
   }
 }
 
@@ -605,6 +627,7 @@ export async function main() {
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
       from: { type: 'string' }, to: { type: 'string' }, sort: { type: 'string' },
       group: { type: 'string' }, only: { type: 'string' },
+      rate: { type: 'string' }, days: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' },
       kind: { type: 'string' }, type: { type: 'string' },
       code: { type: 'string' },
       date: { type: 'string' }, 'date-ms': { type: 'string' },

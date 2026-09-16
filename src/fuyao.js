@@ -183,6 +183,11 @@ export const ENDPOINTS = {
     path: '/api/a-share-index/prices/historical', note: '指数历史K线',
     params: { required: ['thscode', 'interval', 'start', 'end'], example: '--kind index-price-historical --thscode 000001.SH --interval 1d --start 2026-08-01 --end 2026-08-17', warn: 'interval 必须显式传，当前仅支持 1d' },
   },
+  // ETF 行情：A股 price-snapshot 不支持 ETF，场内基金走此端点（仅 ETF，单只）
+  'fund-market-snapshot': {
+    path: '/api/fund/market/snapshot', note: '场内基金(ETF)行情快照',
+    params: { required: ['thscode'], example: '--kind fund-market-snapshot --thscode 510300.SH', warn: '仅支持 ETF；A股行情请用 price-snapshot' },
+  },
 };
 
 /** 常见业务错误码 → 中文修复指引 */

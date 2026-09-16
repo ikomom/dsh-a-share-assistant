@@ -26,7 +26,7 @@ export function loadPortfolio(account) {
   try {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
   } catch {
-    return { initialCapital: 0, cash: 0, positions: {}, history: [], nextId: 1, updatedAt: null };
+    return { initialCapital: 0, cash: 0, repos: [], repoPnlC: 0, positions: {}, history: [], nextId: 1, updatedAt: null };
   }
 }
 
@@ -60,12 +60,24 @@ function ensureNextId(p) {
   return p.nextId;
 }
 
-/** 裸代码 → 带交易所后缀（行情/复权接口要求），如 600900→600900.SH */
+/** 裸代码 → 带交易所后缀（行情接口要求）。覆盖股票、ETF/LOF、国债逆回购。
+ *  沪市：6xx 股票、5xx ETF/基金、9xx B股、204xxx 逆回购
+ *  深市：0xx/3xx 股票、1xx ETF/LOF/债、1318xx 逆回购 */
 export function toThscode(code) {
   const c = String(code).replace(/[^0-9]/g, '');
-  if (/^(60|68)/.test(c)) return c + '.SH';
-  if (/^(00|30)/.test(c)) return c + '.SZ';
+  if (/^204/.test(c)) return c + '.SH';        // 沪市逆回购（GC001 等）
+  if (/^1318/.test(c)) return c + '.SZ';       // 深市逆回购
+  if (/^[569]/.test(c)) return c + '.SH';      // 沪市：股票/ETF/基金/B股
+  if (/^[0123]/.test(c)) return c + '.SZ';     // 深市：股票/ETF/LOF/B股
   return c;
+}
+
+/** 标的类型：repo=逆回购、etf=ETF/LOF、stock=股票（用于展示/统计） */
+export function assetTypeOf(code) {
+  const c = String(code).replace(/[^0-9]/g, '');
+  if (/^204/.test(c) || /^1318/.test(c)) return 'repo';
+  if (/^[15]/.test(c)) return 'etf';
+  return 'stock';
 }
 
 /** 建仓 / 加仓（fee/price 按"元"传入，内部转分） */
@@ -130,7 +142,7 @@ export function setCapital(capital, account) {
   return p.initialCapital;
 }
 
-/** 记录现金/逆回购余额（元→分；用于让"总资产"接近券商） */
+/** 记录现金余额（元→分） */
 export function setCash(amount, account) {
   const p = loadPortfolio(account);
   p.cash = toCents(amount);
@@ -138,11 +150,53 @@ export function setCash(amount, account) {
   return p.cash;
 }
 
+// ── 国债逆回购（GC001/204001 等：融出资金、到期收回本息）────────────────────
+
+/** 记一笔逆回购：amount 元、rate 年化%（如 1.01）、days 天数 */
+export function addRepo({ code = '204001', amount, rate, days = 1, date, note = '', account }) {
+  const p = loadPortfolio(account);
+  p.repos = p.repos || [];
+  const amountC = toCents(amount);
+  if (amountC <= 0) throw new Error('逆回购金额必须为正');
+  const r = Number(rate);
+  if (!Number.isFinite(r) || r <= 0) throw new Error('逆回购利率(%)必须为正，如 1.01');
+  const d = Math.max(1, Math.floor(Number(days) || 1));
+  const start = date || new Date().toISOString().slice(0, 10);
+  const due = new Date(new Date(start + 'T00:00:00+08:00').getTime() + d * 86400000).toISOString().slice(0, 10);
+  const interestC = Math.round(amountC * (r / 100) * (d / 365)); // 预期收益（分）
+  const id = (p.repos.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0)) + 1;
+  const rec = { id, code: String(code), amountC, rate: r, days: d, date: start, dueDate: due, settled: false, interestC, note };
+  p.repos.push(rec);
+  savePortfolio(p, account);
+  return rec;
+}
+
+/** 结算逆回购：本金+收益回笼到现金，收益计入逆回购累计收益 */
+export function settleRepo({ id, account }) {
+  const p = loadPortfolio(account);
+  p.repos = p.repos || [];
+  const rec = p.repos.find((x) => Number(x.id) === Number(id));
+  if (!rec) throw new Error(`未找到逆回购 #${id}`);
+  if (rec.settled) throw new Error(`逆回购 #${id} 已结算`);
+  rec.settled = true;
+  rec.settledAt = new Date().toISOString().slice(0, 10);
+  p.cash = (Number(p.cash) || 0) + rec.amountC + rec.interestC;
+  p.repoPnlC = (Number(p.repoPnlC) || 0) + rec.interestC;
+  savePortfolio(p, account);
+  return rec;
+}
+
+/** 逆回购列表（默认仅未结算；all=true 全部） */
+export function listRepos(account, { all = false } = {}) {
+  const p = loadPortfolio(account);
+  return (p.repos || []).filter((x) => all || !x.settled);
+}
+
 /** 清空台账（account 可选） */
 export function resetPortfolio(account) {
   const f = portfolioFile(account);
   ensureDir(f);
-  fs.writeFileSync(f, JSON.stringify({ initialCapital: 0, cash: 0, positions: {}, history: [], nextId: 1, updatedAt: null }, null, 2));
+  fs.writeFileSync(f, JSON.stringify({ initialCapital: 0, cash: 0, repos: [], repoPnlC: 0, positions: {}, history: [], nextId: 1, updatedAt: null }, null, 2));
   return f;
 }
 
@@ -182,15 +236,24 @@ export async function adjustForDividends(code, account) {
 
 async function fetchPrices(codes) {
   if (!codes.length) return {};
-  try {
-    const res = await getData('price-snapshot', { thscodes: codes.map(toThscode).join(',') });
-    const item = res?.data?.item ?? [];
-    const map = {};
-    for (const it of item) map[String(it.ticker || it.thscode)] = toCents(Number(it.last_price) || 0);
-    return map;
-  } catch {
-    return {};
+  const map = {};
+  // 股票/指数走 A股快照（批量）
+  const stocks = codes.filter((c) => assetTypeOf(c) !== 'etf');
+  if (stocks.length) {
+    try {
+      const res = await getData('price-snapshot', { thscodes: stocks.map(toThscode).join(',') });
+      for (const it of res?.data?.item ?? []) map[String(it.ticker || it.thscode)] = toCents(Number(it.last_price) || 0);
+    } catch { /* 忽略，缺失的用成本价 */ }
   }
+  // ETF 走场内基金快照（单只）
+  for (const e of codes.filter((c) => assetTypeOf(c) === 'etf')) {
+    try {
+      const res = await getData('fund-market-snapshot', { thscode: toThscode(e) });
+      const it = res?.data?.item?.[0];
+      if (it) map[String(it.ticker || it.thscode)] = toCents(Number(it.last_price) || 0);
+    } catch { /* 忽略 */ }
+  }
+  return map;
 }
 
 /** 持仓列表（分字段） */
@@ -222,11 +285,16 @@ export async function summary(account) {
     pnlC += Math.round((priceC - Number(pos.avgCost)) * pos.shares);
   }
   const realizedC = Math.round(p.history.filter((h) => h.type === 'sell').reduce((s, h) => s + (Number(h.realizedPnl) || 0), 0));
+  const repos = p.repos || [];
+  const openRepos = repos.filter((x) => !x.settled);
+  const repoPrincipalC = openRepos.reduce((s, x) => s + Number(x.amountC), 0);
+  const repoInterestC = openRepos.reduce((s, x) => s + Number(x.interestC), 0);
   return {
     initialCapital: p.initialCapital, cash: Number(p.cash) || 0,
     positionCount: codes.length, totalCostC, marketValueC,
     floatPnl: pnlC, realizedPnl: realizedC, totalPnl: pnlC + realizedC,
-    totalAssetsC: marketValueC + (Number(p.cash) || 0),
+    repoPrincipalC, repoInterestC, repoCount: openRepos.length, repoPnlC: Number(p.repoPnlC) || 0,
+    totalAssetsC: marketValueC + (Number(p.cash) || 0) + repoPrincipalC,
     file: portfolioFile(account),
   };
 }
