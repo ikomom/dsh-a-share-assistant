@@ -489,6 +489,10 @@ export async function analyzeHoldings({ date, account } = {}) {
     const floatPnlC = milliTimesSharesToCents(priceMilli - avgMilli, pos.shares);
     // 涨跌幅优先用数据源原值（厘级价差不足以还原真实涨跌幅）
     const srcRatio = snapFresh ? Number(q.price_change_ratio_pct) : NaN;
+    // 持仓来源：建仓日 / 已持有天数 / 最近一笔交易（避免把存量持仓误读成"今天买的"）
+    const hist = p.history.filter((h) => String(h.code) === String(c) && h.date <= day);
+    const lastH = hist[hist.length - 1] || null;
+    const holdingDays = pos.openDate ? Math.max(0, Math.round((Date.parse(day + 'T00:00:00+08:00') - Date.parse(pos.openDate + 'T00:00:00+08:00')) / 86400000)) : null;
     rows.push({
       code: c, name: pos.name || c, isEtf: assetTypeOf(c) === 'etf', shares: pos.shares,
       avgCost: Number(pos.avgCost), avgMilli, price: Math.round(priceMilli / 10), priceMilli,
@@ -496,7 +500,10 @@ export async function analyzeHoldings({ date, account } = {}) {
       openMilli, highMilli, lowMilli, prev: Math.round(prevMilli / 10), prevMilli,
       changePct: Number.isFinite(srcRatio) ? Math.round(srcRatio * 100) / 100 : pct(priceMilli, prevMilli),
       marketValue: marketValueC, floatPnl: floatPnlC, floatPnlPct: pct(priceMilli, avgMilli),
-      cost: Number(pos.cost), openDate: pos.openDate, plan,
+      cost: Number(pos.cost), openDate: pos.openDate, holdingDays, plan,
+      lastTrade: lastH ? { date: lastH.date, time: lastH.time || '', type: lastH.type, shares: lastH.shares, price: Number(lastH.price), fee: Number(lastH.fee) } : null,
+      tradeCount: hist.length,
+      psych: pos.psych || '', note: pos.note || '',
       stop: plan.stopMilli || null, target: plan.targetMilli || null, zoneLow: plan.zoneLowMilli || null, zoneHigh: plan.zoneHighMilli || null,
       distStopPct: plan.stopMilli ? pct(priceMilli, plan.stopMilli) : null,
       distTargetPct: plan.targetMilli ? pct(priceMilli, plan.targetMilli) : null,
@@ -505,7 +512,6 @@ export async function analyzeHoldings({ date, account } = {}) {
       quoteMissing: !priceMilli,
       barsError: b.error || null,
       dataSource: snapFresh ? '实时快照' : bar ? `日线(${shDate(bar.date_ms)})` : '无数据',
-      psych: pos.psych || '', note: pos.note || '',
     });
   }
   const valid = rows.filter((r) => !r.quoteMissing);
@@ -514,8 +520,21 @@ export async function analyzeHoldings({ date, account } = {}) {
   const floatPnlC = sum((r) => r.floatPnl);
   const costC = sum((r) => r.cost);
   const groups = ['stop', 'target', 'zone', 'hold'].map((g) => ({ group: g, rows: rows.filter((r) => r.group === g) })).filter((g) => g.rows.length);
+  // 当日交易流水（复盘"今日操作回顾"用；明确区分"今天买卖了什么"与"手上还持有什么"）
+  const trades = p.history
+    .filter((h) => h.date === day)
+    .map((h) => ({
+      id: h.id, code: h.code, name: h.name || h.code, type: h.type, shares: h.shares,
+      price: Number(h.price), priceText: formatMilli(Number(h.price) * 10, 2),
+      amount: Number(h.amount), fee: Number(h.fee), time: h.time || '',
+      realizedPnl: h.realizedPnl === null || h.realizedPnl === undefined ? null : Number(h.realizedPnl),
+      psych: h.psych || '', note: h.note || '',
+    }))
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  const dayRealizedC = trades.reduce((s, t) => s + (t.realizedPnl || 0), 0);
+  const dayFeesC = trades.reduce((s, t) => s + (t.fee || 0), 0);
   return {
-    date: day, account: account || null, rows, groups,
+    date: day, account: account || null, rows, groups, trades,
     summary: {
       count: rows.length, validCount: valid.length,
       costC, marketValueC, floatPnlC,
@@ -524,6 +543,7 @@ export async function analyzeHoldings({ date, account } = {}) {
       planMissing: rows.filter((r) => !r.hasPlan).length,
       missingQuote: rows.filter((r) => r.quoteMissing).map((r) => r.code),
       groupCounts: Object.fromEntries(groups.map((g) => [g.group, g.rows.length])),
+      tradeCount: trades.length, dayRealizedC, dayFeesC,
     },
   };
 }

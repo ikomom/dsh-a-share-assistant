@@ -35,7 +35,7 @@
       - 个股体检/排雷 → 财务、估值、异动、事件、新闻（`investigate --code X`）
       - ETF/基金体检 → `investigate --code 510300.SH`（自动走 fund-* 端点：资料/收益/回撤/持仓/诊断）
       - 盯盘 → 自选股行情（先查缓存，过期才取）
-      - 持仓分析/持仓复盘 → `position review`（成本/止损/目标/买入区 vs 当日行情 → 分组判定 + 操作取向，出终端表格/Markdown 片段/HTML 报告）
+      - 持仓分析/持仓复盘 → `position review`（大盘+板块+今日流水+持仓逐只 → 完整复盘页 HTML + Markdown 片段；风险日历用 web 搜索补并通过 --events 传入，标源不编造）
       - 复盘 → 涨停梯队、龙虎榜、板块 → 按技能模板生成 {{cwd}}/复盘/YYYY-MM-DD.md
       - 策略验证/离线回测 → 历史行情、财务、全市场 Parquet 导出（`data --kind market-dump-url --dump daily-k`）
 

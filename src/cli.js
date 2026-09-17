@@ -9,6 +9,7 @@ import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS, toMsTimestam
 import * as cache from './cache.js';
 import * as position from './position.js';
 import { buildHoldingsHtml } from './report-html.js';
+import { fetchMarketContext } from './market.js';
 import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
@@ -436,16 +437,58 @@ async function cmdPositionReview(o) {
   const a = await position.analyzeHoldings({ date: o.date, account: o.account });
   a.generatedAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   const s = a.summary;
-  if (!a.rows.length) {
-    log('（台账无持仓，用 position add 建仓后再做持仓分析）');
+  if (!a.rows.length && !s.tradeCount) {
+    log('（台账无持仓、当日也无交易，用 position add 建仓后再做持仓分析）');
     return;
   }
+  // 市场环境（大盘/板块/情绪）：--no-market 可跳过（省时省请求）
+  let market = null;
+  if (!o['no-market']) {
+    try {
+      market = await fetchMarketContext({ date: a.date });
+    } catch (e) {
+      log(`⚠ 市场环境取数失败（不影响持仓分析）: ${e.message}`);
+    }
+  }
+  // 风险日历：由 AI 复盘时用 web 搜索补，通过 --events 传入（不编造）
+  let events = [];
+  if (o.events) {
+    try {
+      const raw = /^[\[{]/.test(String(o.events).trim()) ? o.events : fs.readFileSync(o.events, 'utf8');
+      const parsed = JSON.parse(raw);
+      events = Array.isArray(parsed) ? parsed : parsed.events ?? [];
+      if (!Array.isArray(events)) throw new Error('events 需要是数组 [{date,title,impact?,source?}]');
+    } catch (e) {
+      fail(`--events 解析失败（传 JSON 数组或文件路径）: ${e.message}`);
+    }
+  }
   log(`== 持仓股分析 ${a.date}${o.account ? ' [' + o.account + ']' : ''} ==`);
-  log('代码       名称           股数      成本     现价    当日     止损     目标      浮动盈亏          触发状态');
+  if (market) {
+    const idx = market.indices.map((x) => `${x.name} ${x.changePct === null ? '—' : pctOr(x.changePct)}`).join(' ｜ ');
+    log(`大盘: ${idx}`);
+    if (market.breadth) log(`情绪: 涨停 ${market.breadth.limitUp} ｜ 跌停 ${market.breadth.limitDown} ｜ 炸板 ${market.breadth.limitBreak} ｜ 封板率 ${market.breadth.sealRate === null ? '—' : market.breadth.sealRate + '%'}${market.ladder?.maxBoard ? ` ｜ 最高 ${market.ladder.maxBoard} 板` : ''}${market.sectors.flatLine ? ` ｜ 概念涨 ${market.sectors.flatLine.up}/跌 ${market.sectors.flatLine.down}` : ''}`);
+    if (market.sectors.gainers.length) log(`领涨: ${market.sectors.gainers.slice(0, 5).map((x) => `${x.name} ${pctOr(x.changePct)}`).join(' ｜ ')}`);
+    if (market.sectors.losers.length) log(`领跌: ${market.sectors.losers.slice(0, 5).map((x) => `${x.name} ${pctOr(x.changePct)}`).join(' ｜ ')}`);
+    if (market.errors?.length) log(`⚠ 市场环境部分失败: ${market.errors.join('；')}`);
+  }
+  if (s.tradeCount) {
+    log(`今日交易（${s.tradeCount} 笔，手续费 ${formatYuan(s.dayFeesC)}，已实现 ${formatYuan(s.dayRealizedC)}）:`);
+    for (const t of a.trades) log(`  ${t.time || '--:--:--'} [${t.type === 'buy' ? '买' : '卖'}] ${t.code} ${t.name} ${t.shares}股 @${t.priceText}${t.realizedPnl !== null ? ` 已实现 ${formatYuan(t.realizedPnl)}` : ''}${t.psych ? ` 心理: ${t.psych}` : ''}`);
+  } else {
+    log('今日交易: 无');
+  }
+  log('');
+  // 列宽自适应：全都没计划参数时不占"止损/目标"两列；徽标缩短、日期后置，避免终端折行
+  const showPlan = a.rows.some((r) => r.stop || r.target);
+  const shortBadge = (b) => String(b).replace('（未设计划参数）', '(无计划)').replace('（', '(').replace('）', ')');
+  log(showPlan
+    ? '代码       名称           股数      成本     现价    当日     止损     目标      浮动盈亏        触发状态              建仓/持有'
+    : '代码       名称           股数      成本     现价    当日      浮动盈亏        触发状态              建仓/持有');
   for (const r of a.rows) {
-    log(
-      `${padDisp(r.code, 11)} ${padDisp(r.name || '', 15)} ${padStartDisp(String(r.shares), 6)} ${padStartDisp(yuanOr(r.avgCost), 8)} ${padStartDisp(priceOr(r.priceMilli), 8)} ${padStartDisp(pctOr(r.changePct), 7)} ${padStartDisp(priceOr(r.stop), 8)} ${padStartDisp(priceOr(r.target), 8)} ${padStartDisp(yuanOr(r.floatPnl) + '(' + pctOr(r.floatPnlPct) + ')', 16)}  ${r.badge}${r.quoteMissing ? ' ⚠缺行情' : ''}`
-    );
+    const base = `${padDisp(r.code, 11)} ${padDisp(r.name || '', 15)} ${padStartDisp(String(r.shares), 6)} ${padStartDisp(yuanOr(r.avgCost), 8)} ${padStartDisp(priceOr(r.priceMilli), 8)} ${padStartDisp(pctOr(r.changePct), 7)} ${showPlan ? `${padStartDisp(priceOr(r.stop), 8)} ${padStartDisp(priceOr(r.target), 8)} ` : ''}`;
+    const pnl = padStartDisp(`${yuanOr(r.floatPnl)}(${pctOr(r.floatPnlPct)})`, 15);
+    const held = `${(r.openDate || '—').slice(5)}${r.holdingDays !== null && r.holdingDays !== undefined ? '/' + r.holdingDays + '天' : ''}`;
+    log(`${base}${pnl}  ${padDisp(shortBadge(r.badge), 21)}${held}${r.quoteMissing ? ' ⚠缺行情' : ''}`);
   }
   log('');
   for (const g of a.groups) {
@@ -473,10 +516,10 @@ async function cmdPositionReview(o) {
   if (!o['no-html']) {
     const file = o.out || path.join(NOTES_ROOT || process.cwd(), '复盘', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, buildHoldingsHtml(a), 'utf8');
-    log(`✔ HTML 报告已生成: ${file}（单文件自包含，ECharts 已内联，断网也能出图）`);
+    fs.writeFileSync(file, buildHoldingsHtml({ analysis: a, market, events, options: { generatedAt: a.generatedAt } }), 'utf8');
+    const sec = [market ? `${market.sectors.gainers.length + market.sectors.losers.length} 个板块` : '', events.length ? `${events.length} 条风险日历` : '风险日历待补'].filter(Boolean).join(' + ');
+    log(`✔ HTML 报告已生成: ${file}（单文件自包含，ECharts 已内联，断网也能出图；含大盘/板块/${sec}）`);
   }
-  if (o.out && !o['no-html']) return;
 }
 
 // ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today|query> ──
@@ -765,9 +808,10 @@ ETF/基金参数: --thscode 510300.SH（ETF/基金单只）
                  [--name --date --note --psych --fee N | --auto-fee [--account 名称]]
                  [--stop 价 --target 价 --zone 低-高（计划参数，供持仓分析判定）]
                  | plan --code X [--stop S --target T --zone A-B]（给已有持仓补/改计划参数）
-                 | review [--date D] [--out 路径] [--no-html] [--no-md] [--md-file 路径]
-                   持仓股分析：成本/止损/目标/买入区 vs 当日真实行情 → 分组判定 + 操作取向
+                 | review [--date D] [--out 路径] [--no-html] [--no-md] [--no-market] [--events 文件|JSON]
+                   持仓股分析/复盘页：大盘（指数+情绪）+ 板块（领涨/领跌）+ 今日交易流水 + 持仓逐只判定
                    （默认生成单文件 HTML 报告 + 打印 Markdown 片段；判定照《复盘模板生成指南》§3）
+                   --events 传风险日历（[{date,title,impact,source}]，AI 复盘时用 web 搜索补，不编造）
                  | sell --code X --shares N --price P [--date --psych --fee|--auto-fee]
                  | psych --code X --text "..." [--date D] | adjust --code X（除息复权成本调整）
                  | cash --amount N（现金/逆回购）| import --file F | reset --yes | list | summary | today [--date D]
@@ -794,7 +838,8 @@ export async function main() {
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' }, amount: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
       stop: { type: 'string' }, target: { type: 'string' }, zone: { type: 'string' },
-      'no-html': { type: 'boolean' }, 'no-md': { type: 'boolean' }, 'md-file': { type: 'string' }, out: { type: 'string' },
+      'no-html': { type: 'boolean' }, 'no-md': { type: 'boolean' }, 'no-market': { type: 'boolean' },
+      'md-file': { type: 'string' }, out: { type: 'string' }, events: { type: 'string' },
       from: { type: 'string' }, to: { type: 'string' }, sort: { type: 'string' },
       group: { type: 'string' }, only: { type: 'string' },
       rate: { type: 'string' }, days: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' },

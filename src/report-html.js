@@ -44,6 +44,12 @@ function stockCard(r) {
   if (r.target) planBits.push(`目标 ${pr(r.target)}`);
   if (r.stop) planBits.push(`止损 ${pr(r.stop)}`);
   const meta = planBits.length ? planBits.join(' ｜ ') : '未设计划参数（仅成本盈亏分析）';
+  // 持仓来源：建仓日 + 已持有天数 + 最近一笔 —— 明确"这是存量持仓，不是今天买的"
+  const held = [
+    r.openDate ? `建仓 ${esc(r.openDate)}${r.holdingDays !== null && r.holdingDays !== undefined ? `（已持有 ${r.holdingDays} 天）` : ''}` : '',
+    r.lastTrade ? `最近一笔 ${esc(r.lastTrade.date)}${r.lastTrade.time ? ' ' + esc(r.lastTrade.time) : ''} ${r.lastTrade.type === 'buy' ? '买入' : '卖出'} ${r.lastTrade.shares}股 @${formatMilli(r.lastTrade.price * 10, 2)}` : '（无交易流水）',
+    r.tradeCount ? `累计 ${r.tradeCount} 笔` : '',
+  ].filter(Boolean).join(' ｜ ');
   return `
   <div class="stock">
     <div class="head"><span class="name">${esc(r.name)}</span><span class="code">${esc(r.code)}${r.isEtf ? ' · ETF' : ''}</span>
@@ -51,6 +57,7 @@ function stockCard(r) {
     <div class="datarow">现价 <span class="${pctClass(r.changePct)}">${pr(r.priceMilli)}</span>
       （${pctText(r.changePct)}）｜ 开 ${pr(r.openMilli)} 高 ${pr(r.highMilli)} 低 ${pr(r.lowMilli)} ｜ 市值 ${yuan(r.marketValue)} ｜ 浮动
       <span class="${pctClass(r.floatPnl)}">${yuan(r.floatPnl)}（${pctText(r.floatPnlPct)}）</span></div>
+    <div class="note">${held}</div>
     <div class="note">${meta}${r.stop ? ` ｜ 距止损 ${pctText(r.distStopPct)}` : ''}${r.target ? ` ｜ 距目标 ${pctText(r.distTargetPct)}` : ''} ｜ 数据源 ${esc(r.dataSource)}</div>
     <div class="op"><b>操作：</b>${esc(r.action)}</div>
   </div>`;
@@ -58,9 +65,16 @@ function stockCard(r) {
 
 /**
  * 生成持仓分析 HTML（单文件；ECharts 内联，断网可用）。
- * @param {object} a analyzeHoldings() 的返回值
+ * @param {object} p
+ * @param {object} p.analysis analyzeHoldings() 的返回值
+ * @param {object} [p.market]   fetchMarketContext() 的返回值（大盘/板块/情绪）
+ * @param {Array}  [p.events]   风险日历条目 [{date,title,impact?,source?}]
+ * @param {object} [p.options]  {generatedAt, marketErrors}
  */
-export function buildHoldingsHtml(a) {
+export function buildHoldingsHtml(p) {
+  const a = p.analysis ?? p;
+  const market = p.market ?? null;
+  const events = (p.events ?? []).filter((e) => e && (e.date || e.title));
   const s = a.summary;
   const named = a.rows.map((r) => ({ ...r, label: r.name && r.name !== r.code ? `${r.name}(${r.code})` : r.code }));
   const d = a.date;
@@ -87,6 +101,51 @@ export function buildHoldingsHtml(a) {
     return `<div class="group-h ${meta.cls}">${meta.title}（${g.rows.length} 只）</div>${g.rows.map(stockCard).join('')}`;
   }).join('');
 
+  // ── 市场环境块 ────────────────────────────────────────────────────────────
+  const idxCards = market?.indices?.length
+    ? market.indices.map((x) => `<div class="idx">
+        <div class="idx-name">${esc(x.name)}<span class="code"> ${esc(x.code)}</span></div>
+        <div class="idx-val ${pctClass(x.changePct)}">${x.last === null ? '—' : x.last.toFixed(2)}</div>
+        <div class="idx-chg ${pctClass(x.changePct)}">${x.change === null ? '—' : (x.change > 0 ? '+' : '') + x.change.toFixed(2)}（${pctText(x.changePct)}）</div>
+      </div>`).join('')
+    : '<div class="empty">指数行情未取到</div>';
+
+  const breadth = market?.breadth;
+  const ladder = market?.ladder;
+  const sentiment = breadth
+    ? `<div class="sent">
+        <span class="pill buy">涨停 ${breadth.limitUp}</span>
+        <span class="pill watch">跌停 ${breadth.limitDown}</span>
+        <span class="pill info">炸板 ${breadth.limitBreak}</span>
+        <span class="pill hold">封板率 ${breadth.sealRate === null ? '—' : breadth.sealRate + '%'}</span>
+        ${ladder && ladder.maxBoard ? `<span class="pill info">最高 ${ladder.maxBoard} 板${ladder.maxBoardNames.length ? '（' + esc(ladder.maxBoardNames.join('、')) + '）' : ''}</span>` : ''}
+        ${market?.sectors?.flatLine ? `<span class="pill info">概念涨 ${market.sectors.flatLine.up} / 跌 ${market.sectors.flatLine.down}</span>` : ''}
+      </div>`
+    : '<div class="empty">涨跌停情绪未取到</div>';
+
+  const sectorTable = market?.sectors?.gainers?.length
+    ? `<table>
+        <tr><th>领涨概念</th><th style="text-align:right">涨幅</th><th>领跌概念</th><th style="text-align:right">跌幅</th></tr>
+        ${market.sectors.gainers.map((g, i) => {
+          const l = market.sectors.losers[i] || {};
+          return `<tr><td>${esc(g.name)}</td><td class="num up">${pctText(g.changePct)}</td><td>${esc(l.name || '')}</td><td class="num down">${l.changePct === undefined ? '' : pctText(l.changePct)}</td></tr>`;
+        }).join('')}
+      </table>`
+    : '<div class="empty">板块行情未取到</div>';
+
+  const tradeRows = (a.trades ?? []).map((t) => `<tr>
+      <td>${esc(t.time || '')}</td>
+      <td>${esc(t.name)}<br><span class="code">${esc(t.code)}</span></td>
+      <td><span class="tag ${t.type === 'buy' ? 'buy' : 'sell'}">${t.type === 'buy' ? '买入' : '卖出'}</span></td>
+      <td class="num">${t.shares}</td><td class="num">${formatMilli(t.price * 10, 2)}</td>
+      <td class="num">${yuan(t.amount)}</td><td class="num">${yuan(t.fee)}</td>
+      <td class="num ${pctClass(t.realizedPnl)}">${t.realizedPnl === null ? '—' : yuan(t.realizedPnl)}</td>
+      <td class="note-small">${esc(t.psych || t.note || '')}</td></tr>`).join('');
+
+  const eventRows = events.length
+    ? events.map((e) => `<tr><td>${esc(e.date || '')}</td><td>${esc(e.title || '')}</td><td>${esc(e.impact || '')}</td><td class="note-small">${esc(e.source || '')}</td></tr>`).join('')
+    : `<tr><td colspan="4" class="empty">未提供。复盘时可用 web 搜索补齐（宏观数据发布、解禁、会议、财报窗口等），并在「来源」列标注链接——本页不编造事件。</td></tr>`;
+
   const rangeRows = named.filter((r) => r.stop && r.target && r.target > r.stop);
   const chartData = {
     names: named.map((r) => r.label),
@@ -98,8 +157,15 @@ export function buildHoldingsHtml(a) {
       pos: Math.round(((r.priceMilli - r.stop) / (r.target - r.stop)) * 1000) / 10,
       price: r.priceMilli, stop: r.stop, target: r.target,
     })),
+    idxNames: (market?.indices ?? []).map((x) => x.name),
+    idxPct: (market?.indices ?? []).map((x) => x.changePct ?? 0),
+    secUpNames: (market?.sectors?.gainers ?? []).map((x) => x.name),
+    secUpPct: (market?.sectors?.gainers ?? []).map((x) => x.changePct),
+    secDownNames: (market?.sectors?.losers ?? []).map((x) => x.name),
+    secDownPct: (market?.sectors?.losers ?? []).map((x) => x.changePct),
   };
   const h = (n) => Math.max(170, n * 54 + 70); // 图表高度随持仓数自适应，避免大片留白
+  const marketErrors = (p.options?.marketErrors ?? market?.errors ?? []);
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -144,9 +210,20 @@ ${echartsTag()}
   .trig.zone{background:#fde8e8;color:${C_UP}}
   .datarow{font-size:13px;color:${C_INK};margin:8px 0}
   .note{font-size:12px;color:#6b7280;margin:6px 0}
+  .note-small{font-size:11.5px;color:#8b93a1}
   .op{font-size:13px;background:#f7f8fa;padding:8px 10px;border-radius:8px}
   .chart{width:100%}
   .empty{color:#9aa0a6;font-size:13px;padding:8px 0}
+  .idxs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  .idx{background:#fafbfc;border:1px solid ${C_LINE};border-radius:8px;padding:10px 12px}
+  .idx-name{font-size:12.5px;color:#6b7280}
+  .idx-val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin:2px 0}
+  .idx-chg{font-size:12.5px}
+  .sent{margin:4px 0 12px}
+  .tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:6px}
+  .tag.buy{background:#fde8e8;color:${C_UP}}
+  .tag.sell{background:#e8f5ee;color:${C_DOWN}}
+  .chart-title{font-size:14.5px;color:${C_INK};margin:16px 0 6px;font-weight:600}
   .foot{font-size:12px;color:#9aa0a6;margin-top:28px;border-top:1px solid ${C_LINE};padding-top:12px}
   .foot b{color:#6b7280}
 </style>
@@ -154,8 +231,8 @@ ${echartsTag()}
 <body>
 
 <h1>持仓股分析 · ${esc(d)}</h1>
-<div class="sub">对照台账持仓的「成本 / 止损 / 目标 / 买入区」与当日真实行情，逐只判定触发状态与操作取向</div>
-<div class="meta">分析日 ${esc(d)} ｜ 账户 ${esc(a.account || '默认')} ｜ 数据来源 同花顺金融数据API（fuyao.aicubes.cn） ｜ 行情口径 ${a.rows.some((r) => r.dataSource === '实时快照') ? '实时快照' : '最近交易日日线'} ｜ 生成时间 ${esc(a.generatedAt || '')}</div>
+<div class="sub">今日大盘与板块环境 → 台账持仓的计划对照 → 触发状态与操作取向</div>
+<div class="meta">行情截至 ${esc(d)} ｜ 账户 ${esc(a.account || '默认')} ｜ 数据来源 同花顺金融数据API（fuyao.aicubes.cn） ｜ 持仓行情口径 ${a.rows.some((r) => r.dataSource === '实时快照') ? '实时快照' : '最近交易日日线'}${market?.indexDate ? ` ｜ 指数 ${esc(market.indexDate)}` : ''}${market?.breadth?.date ? ` ｜ 涨跌停 ${esc(market.breadth.date)}` : ''} ｜ 生成时间 ${esc(p.options?.generatedAt || a.generatedAt || '')}</div>
 
 <div class="card tldr">
   <h3>⚡ 一句话结论</h3>
@@ -166,33 +243,66 @@ ${echartsTag()}
   ${s.groupCounts.zone ? `<span class="pill buy">可低吸 ${s.groupCounts.zone} 只</span>` : ''}
   ${s.groupCounts.target ? `<span class="pill hold">止盈 ${s.groupCounts.target} 只</span>` : ''}
   ${s.groupCounts.stop ? `<span class="pill watch">止损预警 ${s.groupCounts.stop} 只</span>` : ''}
+  ${s.tradeCount ? `<span class="pill info">今日交易 ${s.tradeCount} 笔</span>` : ''}
 </div>
 
-<h2>持仓概览</h2>
+<h2>一、今日大盘</h2>
 <div class="card">
-<table>
-  <tr><th>名称/代码</th><th style="text-align:right">股数</th><th style="text-align:right">成本</th><th style="text-align:right">现价</th><th style="text-align:right">当日</th><th style="text-align:right">止损</th><th style="text-align:right">目标</th><th style="text-align:right">浮动盈亏</th><th>触发状态</th></tr>
-  ${overview || '<tr><td colspan="9" class="empty">（台账无持仓）</td></tr>'}
-</table>
+  <div class="idxs">${idxCards}</div>
+  ${sentiment}
+  <div id="idxChart" class="chart" style="height:${Math.max(150, market?.indices?.length * 42 + 60 || 190)}px"></div>
+  ${marketErrors.length ? `<div class="empty">⚠ 部分数据未取到：${esc(marketErrors.join('；'))}</div>` : ''}
 </div>
 
-<h2>浮动盈亏率（%）</h2>
+<h2>二、板块表现${market?.sectors?.total ? `（概念 ${market.sectors.total} 个）` : ''}</h2>
+<div class="card">
+  ${sectorTable}
+  ${market?.sectors?.gainers?.length ? '<div id="secChart" class="chart" style="height:' + h(market.sectors.gainers.length + market.sectors.losers.length) + 'px"></div>' : ''}
+</div>
+
+<h2>三、今日交易流水${s.tradeCount ? `（${s.tradeCount} 笔）` : ''}</h2>
+<div class="card">
+  ${s.tradeCount
+    ? `<table>
+        <tr><th>时间</th><th>标的</th><th>方向</th><th style="text-align:right">股数</th><th style="text-align:right">成交价</th><th style="text-align:right">金额</th><th style="text-align:right">手续费</th><th style="text-align:right">已实现</th><th>备注</th></tr>
+        ${tradeRows}
+      </table>
+      <div class="note">当日合计：手续费 ${yuan(s.dayFeesC)} ｜ 已实现盈亏 ${yuan(s.dayRealizedC)}</div>`
+    : '<div class="empty">今日无交易流水（台账里没有当日买卖记录）</div>'}
+</div>
+
+<h2>四、持仓逐只分析（${named.length} 只）</h2>
+<div class="card">
+  <table>
+    <tr><th>名称/代码</th><th style="text-align:right">股数</th><th style="text-align:right">成本</th><th style="text-align:right">现价</th><th style="text-align:right">当日</th><th style="text-align:right">止损</th><th style="text-align:right">目标</th><th style="text-align:right">浮动盈亏</th><th>触发状态</th></tr>
+    ${overview || '<tr><td colspan="9" class="empty">（台账无持仓）</td></tr>'}
+  </table>
+</div>
+
+<h3 class="chart-title">浮动盈亏率（%）</h3>
 <div class="card"><div id="pnlChart" class="chart" style="height:${h(named.length)}px"></div></div>
 
-<h2>当日涨跌幅（%）</h2>
+<h3 class="chart-title">当日涨跌幅（%）</h3>
 <div class="card"><div id="chgChart" class="chart" style="height:${h(named.length)}px"></div></div>
 
-<h2>持仓市值占比</h2>
+<h3 class="chart-title">持仓市值占比</h3>
 <div class="card"><div id="mvChart" class="chart" style="height:${Math.max(260, named.length * 26 + 180)}px"></div></div>
 
-${rangeRows.length ? `<h2>计划区间位置（止损 = 0% → 目标 = 100%）</h2>
+${rangeRows.length ? `<h3 class="chart-title">计划区间位置（止损 = 0% → 目标 = 100%）</h3>
 <div class="card"><div id="rangeChart" class="chart" style="height:${h(rangeRows.length)}px"></div></div>` : ''}
 
-<h2>逐只分析与操作取向</h2>
 ${groupHtml || '<div class="card empty">（台账无持仓）</div>'}
 
+<h2>五、风险日历（未来 3–5 日）</h2>
+<div class="card">
+  <table>
+    <tr><th>日期</th><th>事件</th><th>可能影响</th><th>来源</th></tr>
+    ${eventRows}
+  </table>
+</div>
+
 <div class="foot">
-  <p><b>分析说明：</b>本页为台账持仓（${esc(a.account || '默认账户')}）的计划对照分析，止损/目标/买入区沿用台账记录，不做改动；行情与日线来自同花顺金融数据 API，逐只判定规则为「当日最低价 ≤ 买入区上沿 且 收盘 ≥ 止损 → 可低吸；触/逼目标 → 止盈；破位/逼近止损 → 止损预警」，只标注「计划 vs 现实」的偏差。</p>
+  <p><b>分析说明：</b>本页为台账持仓（${esc(a.account || '默认账户')}）的计划对照分析，止损/目标/买入区沿用台账记录，不做改动；行情、指数、板块与涨跌停数据来自同花顺金融数据 API，逐只判定规则为「当日最低价 ≤ 买入区上沿 且 收盘 ≥ 止损 → 可低吸；触/逼目标 → 止盈；破位/逼近止损 → 止损预警」，只标注「计划 vs 现实」的偏差。持仓卡片中的「建仓 / 最近一笔」用于区分**存量持仓**与**今日交易**。</p>
   <p><b>风险提示：</b>本页仅基于公开市场数据与用户自记台账做客观标注，不含主观分析，不构成投资建议或证券投资咨询服务；市场有风险，决策需谨慎，请以交易所官方数据为准。</p>
 </div>
 
@@ -253,6 +363,38 @@ if (DATA.rangePos.length){
       label:{show:true,position:'right',formatter:'{c}%',fontSize:11.5,color:INK},
       markLine:{silent:true,symbol:'none',lineStyle:{color:'#c9ced6',type:'dashed'},label:{color:'#9aa0a6',fontSize:11},
         data:[{xAxis:0,name:'止损'},{xAxis:100,name:'目标'}]}
+    }]
+  });
+}
+// 指数涨跌（大盘）
+if (DATA.idxNames.length){
+  init('idxChart', {
+    grid:{left:6,right:56,top:12,bottom:6,containLabel:true},
+    tooltip:{trigger:'axis',axisPointer:{type:'shadow'},valueFormatter:function(v){return v+'%';}},
+    xAxis:Object.assign({type:'value',axisLabel:{formatter:'{value}%',color:INK,fontSize:11.5},splitLine:{lineStyle:{color:LINE}}}, {axisLine:{lineStyle:{color:'#e6e8ec'}},axisTick:{show:false}}),
+    yAxis:Object.assign({type:'category',data:DATA.idxNames,inverse:true}, AXIS),
+    series:[{
+      type:'bar', barMaxWidth:22,
+      data:DATA.idxPct.map(function(v){return {value:v,itemStyle:{color:v>=0?UP:DOWN,borderRadius:v>=0?[0,4,4,0]:[4,0,0,4]}};}),
+      label:{show:true,position:'right',formatter:function(p){return p.value+'%';},fontSize:11.5,color:INK},
+      markLine:{silent:true,symbol:'none',lineStyle:{color:'#d7dbe0',type:'dashed'},data:[{xAxis:0}]}
+    }]
+  });
+}
+// 板块涨跌（领涨在上、领跌在下，红涨绿跌）
+if (DATA.secUpNames.length || DATA.secDownNames.length){
+  var secNames = DATA.secUpNames.concat(DATA.secDownNames);
+  var secVals = DATA.secUpPct.concat(DATA.secDownPct);
+  init('secChart', {
+    grid:{left:6,right:56,top:12,bottom:6,containLabel:true},
+    tooltip:{trigger:'axis',axisPointer:{type:'shadow'},valueFormatter:function(v){return v+'%';}},
+    xAxis:Object.assign({type:'value',axisLabel:{formatter:'{value}%',color:INK,fontSize:11.5},splitLine:{lineStyle:{color:LINE}}}, {axisLine:{lineStyle:{color:'#e6e8ec'}},axisTick:{show:false}}),
+    yAxis:Object.assign({type:'category',data:secNames,inverse:true}, AXIS),
+    series:[{
+      type:'bar', barMaxWidth:18,
+      data:secVals.map(function(v){return {value:v,itemStyle:{color:v>=0?UP:DOWN,borderRadius:v>=0?[0,4,4,0]:[4,0,0,4]}};}),
+      label:{show:true,position:'right',formatter:function(p){return p.value+'%';},fontSize:11,color:INK},
+      markLine:{silent:true,symbol:'none',lineStyle:{color:'#d7dbe0',type:'dashed'},data:[{xAxis:0}]}
     }]
   });
 }
