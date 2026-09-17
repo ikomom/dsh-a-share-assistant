@@ -58,6 +58,8 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 
 DSH 界面**新建会话 → 预设选择「A股助手」**，先跑 `node src/cli.js check` 自检。
 
+会话内支持 **`/compact`**（上下文压缩）：上下文吃紧时自动压缩，也可手动敲 `/compact` 立即压缩一段较老历史（不消耗模型轮次）。长会话做复盘前敲一次，能明显压低后续 token 成本。
+
 ## 使用
 
 对话中直接说：

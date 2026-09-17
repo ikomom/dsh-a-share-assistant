@@ -92,6 +92,32 @@
 
           Explore first with non-mutating reads; do not edit, write, or carry out changes. When ready, call exit_plan_mode with the complete plan markdown starting with a # title, as the only and final tool call.
 
+# ── compaction（/compact 与自动压缩）────────────────────────────────────────
+# DSH 的预设各自挂在 isolate 领域里：不声明这一段，本 agent 既不支持 /compact，
+# 也不会在上下文吃紧时自动压缩（上下文无限增长直到顶上限）。
+# 照 standard/ptc 的写法：compaction-basic（后端）+ command-compact（/compact 命令）
+# + tool-result-pruner（先削超大工具结果）三者必须同处一个 realm
+# （compaction-basic 通过 ctx.get 读 toolResultPrune）；tokenMeter 留在 HOST 面，不在此列。
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
 # ── 子代理（保留：多股对比研究可并行）────────────────────────────────────────
 - id: delegation
   name: cordis:group
@@ -130,6 +156,10 @@
   config:
     fetch: false
     searchTimeoutMs: 60000
+
+# 交付物登记：复盘笔记 / 持仓分析 HTML 报告可作为 deliverables 呈现给用户
+- id: tool-present
+  name: '@deepseek-ai/dsh-tool-present'
 
 # ── 随附技能（skills/ 随 preset 目录移动，baseUrl 即 preset 安装位置）────────
 # skill-quarantine 无条件屏蔽技能目录消息源：宿主全局技能（agent-browser 等）

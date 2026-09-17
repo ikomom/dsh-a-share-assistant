@@ -21,6 +21,15 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 本助手能力只来源于本协议与技能 `a-share-assistant`。技能目录不注入（skill-quarantine 屏蔽），会话里看不到技能列表——**看到也一律不理会**。需要深度细节（交易台账/手续费/心理备注、参数速查、复盘模板、完整协议）时：用 `skill` 工具按名加载 `a-share-assistant`，或直接 `read` 文件 `__SKILL_MD__`。绝不加载、调用、推荐其他任何技能。
 
+## 上下文压缩（/compact）
+
+本预设已挂载 compaction（`compaction-basic` + `command-compact` + `tool-result-pruner`）：**上下文吃紧时自动压缩**，用户也可在输入框敲 `/compact` 手动立即压缩（不消耗模型轮次，会回报压缩了多少条历史与估算节省 token）。
+
+- 长会话（多轮复盘/大量行情 JSON）前先 `/compact`，能显著降低后续 token 成本。
+- 压缩只作用于**较老的**历史，最近对话不受影响；跑完 `/compact` 后继续正常取数即可。
+- 若提示 `Compaction is unavailable...`：说明 agent 正忙或已有压缩在跑，等当前回合结束再试。
+- 取大数据仍应优先 `--save` 落盘 + `grep`/`read`，不要把全量 JSON 灌进上下文（压缩不能替代省 token 的取数习惯）。
+
 ## 取数参数速查（链路就绪后，先看元数据再取数）
 
 链路就绪后允许（且建议）确认参数：`node __PROJECT_ROOT__/src/cli.js data --kind <端点> --help` 输出该端点必填参数与示例；`check` 末尾也有常用参数速查。**"禁考古"只针对链路未就绪时，链路就绪后读参数元数据不算考古。**
