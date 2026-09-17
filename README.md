@@ -1,6 +1,6 @@
 # dsh-a-share-assistant
 
-[![Release v0.1.2](https://img.shields.io/badge/release-v0.1.2-5B4CF0?style=flat-square)](https://github.com/ikomom/dsh-a-share-assistant)
+[![Release v0.1.3](https://img.shields.io/badge/release-v0.1.3-5B4CF0?style=flat-square)](https://github.com/ikomom/dsh-a-share-assistant)
 [![Node >=18](https://img.shields.io/badge/Node-%3E%3D18-0B7285?style=flat-square)](https://nodejs.org/)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh%20plugin-5B4CF0?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 
@@ -11,10 +11,14 @@
 | 能力 | 说明 |
 |---|---|
 | 场景路由 | 选股 / 个股体检、盯盘、复盘、策略验证 5 大场景，AI 按路由调数据 |
-| 数据能力 | 28 个真实端点：行情快照、历史K线+复权因子、财务三表、财务指标、涨跌停/炸板池、连板天梯、龙虎榜（机构/游资）、热股榜（含历史/个股走势）、异动原因（个股+列表）、集合竞价、估值、板块/概念、指数、交易日历、标的列表 |
-| 个股体检 | 财务三表 + 指标 + 估值 + 异动 + 新闻兜底，一票否决式排雷，结论带数据时间戳 |
+| 数据能力 | 41 个可用端点：行情快照、历史K线+复权因子、财务三表、财务指标、涨跌停/炸板池、连板天梯、龙虎榜（机构/游资）、热股榜（含历史/个股走势）、异动原因（个股+列表）、集合竞价、估值、板块/概念、指数、交易日历、标的列表、ETF/基金 12 项 |
+| ETF / 基金 | ETF 前复权日线 + 行情快照；基金资料、区间收益、净值、最大回撤、历史业绩指标、重仓持仓、资产配置、诊断、前十大持有人、分红记录——场内 ETF 与场外公募基金都能查 |
+| 全市场导出 | `market-dump-url` 取 10 年全市场日K / 最近 10 交易日日K / 复权因子 Parquet 预签名下载链接（5 分钟有效），适合离线回测与自建库 |
+| 个股与 ETF 体检 | `investigate` 自动判别标的类型：股票走财务三表+指标+估值+异动，ETF 走资料+收益+回撤+持仓+诊断；一票否决式排雷，结论带数据时间戳 |
 | 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进笔记库 |
 | 交易台账 | 记录本金、建仓/加仓/卖出、每笔心理备注（**股票 / ETF / 国债逆回购**）→ `position`，AI 对话记账，复盘"操作回顾"自动引用 |
+
+> 官方另有「主力资金」「高频动向」等能力，目前仅对同花顺 AI 客户端开放（外部 Key 调用返回 `code=2004`），本插件不做无谓重试。
 
 ## 数据源与缓存
 
@@ -76,7 +80,10 @@ node src/cli.js cache status         # 缓存状态
 node src/cli.js cache latest --type <type> [--code X]   # 取最近缓存（--code 查个股）
 node src/cli.js data --kind <端点> [参数] [--save <类型> [--code X]]
                                      # 取数并可选落缓存（--kind X --help 看参数）
-node src/cli.js investigate --code X [--report YYYY-N]   # 一键个股体检（拉齐行情/三表/估值/异动落盘）
+node src/cli.js investigate --code X [--report YYYY-N]   # 一键体检（股票/ETF 自动判别，拉齐数据落盘）
+node src/cli.js data --kind fund-returns --thscode 510300.SH    # ETF/基金：区间收益
+node src/cli.js data --kind fund-market-historical --thscode 510300.SH --interval 1d --start 2026-08-01 --end 2026-09-17
+node src/cli.js data --kind market-dump-url --dump daily-k-10d  # 全市场日K Parquet 下载链接
 node src/cli.js position init --capital N                       # 设初始本金
 node src/cli.js position add --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee [--account 名称]]  # 建仓/加仓（加权成本）
 node src/cli.js position sell --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee]  # 减仓/清仓（自动算已实现盈亏）
@@ -86,7 +93,8 @@ node src/cli.js daily-snapshot [--date D]                       # 一键每日�
 ```
 
 端点参数示例：`data --kind price-historical --thscode 600396.SH --interval 1d --start 2026-08-01 --end 2026-08-17`。
-详细参数用 `data --kind <端点> --help` 查询，`check` 末尾有速查表。
+详细参数用 `data --kind <端点> --help` 查询（含必填项、枚举取值、注意事项），`check` 末尾有速查表。
+日期参数可写 `YYYY-MM-DD`（自动转 Asia/Shanghai 毫秒戳，接口只认毫秒戳）。
 
 ## 安全与合规
 

@@ -234,48 +234,73 @@ export async function adjustForDividends(code, account) {
   return { adjusted: true, totalDivC: divC, avgBefore, avgAfter: pos.avgCost };
 }
 
+/** 拉取持仓现价（分）。返回 { prices, missing } —— missing=未取到行情的代码，
+ *  调用方必须把「按成本价兜底」这件事告诉用户，不能让 0 浮盈冒充真实盈亏。 */
 async function fetchPrices(codes) {
-  if (!codes.length) return {};
-  const map = {};
+  const prices = {};
+  const missing = [];
+  if (!codes.length) return { prices, missing };
+  // 同时登记裸代码与带后缀代码，避免台账代码格式与接口回包不一致导致取不到价
+  const put = (code, it, priceC) => {
+    if (!priceC) return;
+    for (const k of [code, it?.ticker, it?.thscode]) if (k) prices[String(k)] = priceC;
+  };
   // 股票/指数走 A股快照（批量）
   const stocks = codes.filter((c) => assetTypeOf(c) !== 'etf');
   if (stocks.length) {
     try {
       const res = await getData('price-snapshot', { thscodes: stocks.map(toThscode).join(',') });
-      for (const it of res?.data?.item ?? []) map[String(it.ticker || it.thscode)] = toCents(Number(it.last_price) || 0);
-    } catch { /* 忽略，缺失的用成本价 */ }
+      for (const it of res?.data?.item ?? []) {
+        const hit = stocks.find((c) => String(c) === String(it.ticker) || String(c) === String(it.thscode));
+        put(hit ?? it.ticker, it, toCents(Number(it.last_price) || 0));
+      }
+    } catch { /* 忽略，缺失的用成本价并计入 missing */ }
   }
-  // ETF 走场内基金快照（单只）
+  // ETF 走场内基金快照（单只；偶发 code=3002 数据未就绪）
   for (const e of codes.filter((c) => assetTypeOf(c) === 'etf')) {
+    let priceC = 0;
+    let it = null;
     try {
       const res = await getData('fund-market-snapshot', { thscode: toThscode(e) });
-      const it = res?.data?.item?.[0];
-      if (it) map[String(it.ticker || it.thscode)] = toCents(Number(it.last_price) || 0);
+      it = res?.data?.item?.[0] ?? null;
+      if (it) priceC = toCents(Number(it.last_price) || 0);
     } catch { /* 忽略 */ }
+    if (!priceC) {
+      // 快照未就绪 → 退回最近一根前复权日线收盘（比直接按成本价报 0 浮盈更诚实）
+      try {
+        const end = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+        const start = new Date(Date.now() - 10 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+        const res = await getData('fund-market-historical', { thscode: toThscode(e), interval: '1d', start, end });
+        const items = res?.data?.item ?? [];
+        if (items.length) priceC = toCents(Number(items[items.length - 1].close_price) || 0);
+      } catch { /* 忽略 */ }
+    }
+    put(e, it, priceC);
   }
-  return map;
+  for (const c of codes) if (!prices[c]) missing.push(c);
+  return { prices, missing };
 }
 
 /** 持仓列表（分字段） */
 export async function listPositions(account) {
   const p = loadPortfolio(account);
   const codes = Object.keys(p.positions);
-  const pricesC = await fetchPrices(codes);
+  const { prices: pricesC, missing } = await fetchPrices(codes);
   const rows = codes.map((c) => {
     const pos = p.positions[c];
     const priceC = pricesC[c] || Number(pos.avgCost);
     const marketValueC = priceC * pos.shares;
     const pnlC = Math.round((priceC - Number(pos.avgCost)) * pos.shares);
-    return { ...pos, price: priceC, marketValue: marketValueC, pnl: pnlC, pnlPct: Number(pos.avgCost) ? Math.round((priceC / Number(pos.avgCost) - 1) * 10000) / 100 : 0 };
+    return { ...pos, price: priceC, marketValue: marketValueC, pnl: pnlC, quoteMissing: !pricesC[c], pnlPct: Number(pos.avgCost) ? Math.round((priceC / Number(pos.avgCost) - 1) * 10000) / 100 : 0 };
   });
-  return { initialCapital: p.initialCapital, cash: p.cash, rows, file: portfolioFile(account) };
+  return { initialCapital: p.initialCapital, cash: p.cash, rows, missing, file: portfolioFile(account) };
 }
 
 /** 总览（分字段；cash 现金；marketValueC 股票市值；totalAssetsC=市值+现金） */
 export async function summary(account) {
   const p = loadPortfolio(account);
   const codes = Object.keys(p.positions);
-  const pricesC = await fetchPrices(codes);
+  const { prices: pricesC, missing } = await fetchPrices(codes);
   let totalCostC = 0, marketValueC = 0, pnlC = 0;
   for (const c of codes) {
     const pos = p.positions[c];
@@ -295,7 +320,7 @@ export async function summary(account) {
     floatPnl: pnlC, realizedPnl: realizedC, totalPnl: pnlC + realizedC,
     repoPrincipalC, repoInterestC, repoCount: openRepos.length, repoPnlC: Number(p.repoPnlC) || 0,
     totalAssetsC: marketValueC + (Number(p.cash) || 0) + repoPrincipalC,
-    file: portfolioFile(account),
+    missing, file: portfolioFile(account),
   };
 }
 

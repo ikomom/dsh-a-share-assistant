@@ -5,14 +5,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS } from './fuyao.js';
+import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS, toMsTimestamp } from './fuyao.js';
 import * as cache from './cache.js';
 import * as position from './position.js';
 import { formatYuan, toCents } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
-export const CLI_VERSION = '0.1.2';
+export const CLI_VERSION = '0.1.3';
 
 function log(msg) {
   console.log(msg);
@@ -82,6 +82,9 @@ async function cmdCheck(opts = {}) {
   log('  K线/指数:       --thscode X --start YYYY-MM-DD --end YYYY-MM-DD（自动转毫秒）');
   log('  龙虎榜:         --board-type all|org|hot_money --date YYYY-MM-DD');
   log('  板块:           --tag cn_concept|industry');
+  log('  ETF/基金:       --thscode 510300.SH（单只）；fund-market-historical/fund-profile/fund-returns/fund-nav/fund-drawdowns/fund-holdings/fund-diagnostics');
+  log('  全市场导出:     --kind market-dump-url --dump daily-k|daily-k-10d|adjustment-factors（Parquet 链接 5 分钟失效）');
+  log('  ⛔ 不可用:       主力资金/高频动向（官方仅对同花顺AI客户端开放，code=2004）——不要试调');
   log('提示: 端点详细参数用 `node src/cli.js data --kind <端点> --help` 查询');
 }
 
@@ -180,14 +183,7 @@ function cmdCacheClean(opts) {
 }
 
 // ── 取数：node cli.js data --kind <端点> [参数] [--save <缓存类型> [--code X] --date D] ──
-function toMsTimestamp(value) {
-  // 接受 YYYY-MM-DD（Asia/Shanghai 当日零点）或已有毫秒戳
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
-    return String(Date.parse(`${value}T00:00:00+08:00`));
-  }
-  return value;
-}
-
+// 日期→毫秒戳的归一化在 fuyao.js 的 getData 内统一处理（toMsTimestamp），此处不再重复转换
 async function cmdData(opts) {
   const kind = opts.kind;
   if (!kind) {
@@ -199,10 +195,12 @@ async function cmdData(opts) {
     log(`端点: ${kind}（${spec ? spec.note : '未配置'}）`);
     if (!spec) return;
     log(`路径: ${spec.path}`);
+    if (spec.blocked) log(`状态: ❌ 外部不可用 —— ${spec.blocked}`);
     const req = spec.params?.required ?? [];
     log(`必填参数: ${req.length ? req.join(', ') : '无'}`);
+    for (const [name, allowed] of Object.entries(spec.params?.enum ?? {})) log(`  ${name} 取值: ${allowed.join(' | ')}`);
     if (spec.params?.warn) log(`注意: ${spec.params.warn}`);
-    if (spec.params?.example) log(`示例: node src/cli.js ${spec.params.example}`);
+    if (spec.params?.example) log(`示例: node ${PROJECT_ROOT}/src/cli.js ${spec.params.example}`);
     return;
   }
   const paramMap = {
@@ -216,6 +214,10 @@ async function cmdData(opts) {
     sort_field: opts['sort-field'], sort_dir: opts['sort-dir'],
     stage: opts.stage, exchange: opts.exchange, asset_type: opts['asset-type'],
     tag_codes: opts['tag-codes'], start_date: opts['start-date'], end_date: opts['end-date'],
+    // ETF / 基金 专用
+    dump: opts.dump, nav_type: opts['nav-type'], range: opts.range,
+    report_type: opts['report-type'], report_period: opts['report-period'],
+    subscribe: opts.subscribe, manager_id: opts['manager-id'], company_id: opts['company-id'],
   };
   const params = {};
   for (const [k, v] of Object.entries(paramMap)) {
@@ -234,7 +236,8 @@ async function cmdData(opts) {
   try {
     result = await getData(kind, params);
   } catch (e) {
-    fail(`取数失败: ${e.message}${spec ? `（端点 ${kind}: ${spec.note}）` : ''}`);
+    const dup = e.message.includes(`端点 ${kind}`);
+    fail(`取数失败: ${e.message}${spec && !dup ? `（端点 ${kind}: ${spec.note}）` : ''}`);
   }
   if (result && result.code !== undefined && result.code !== 0) {
     const hint = ERROR_CODE_HINTS[result.code];
@@ -277,34 +280,67 @@ function printDataSummary(result) {
   }
 }
 
-// ── 一键个股体检：node cli.js investigate --code X [--report YYYY-N] ──
+// ── 一键体检：node cli.js investigate --code X [--report YYYY-N] ──
+// 股票 → 行情/三表/估值/异动；ETF/场内基金 → 行情/资料/收益/回撤/持仓/诊断（自动判别）
+/** ETF 行情兜底：快照未就绪（code=3002/停牌）时用最近一根前复权日线收盘价，并标明来源 */
+async function etfQuoteWithFallback(code, d) {
+  const snap = await getData('fund-market-snapshot', { thscode: code });
+  const it = snap?.data?.item?.[0];
+  if (snap?.code === 0 && it) return { ...snap, source: 'fund-market-snapshot(实时快照)' };
+  const hist = await getData('fund-market-historical', { thscode: code, interval: '1d', start: d(15), end: d(0) });
+  const items = hist?.data?.item ?? [];
+  const last = items[items.length - 1];
+  if (hist?.code !== 0 || !last) throw new Error(`快照未就绪(code=${snap?.code})，日线兜底也失败(code=${hist?.code})`);
+  return {
+    code: 0,
+    message: `快照未就绪(code=${snap?.code})，已用最近日线收盘兜底`,
+    source: 'fund-market-historical(最近日线收盘，前复权)',
+    data: { timestamp: last.date_ms, item: [{ thscode: code, ticker: code.split('.')[0], last_price: last.close_price, date_ms: last.date_ms }] },
+  };
+}
+
 async function cmdInvestigate(opts) {
-  if (!opts.code) fail('investigate 需要 --code <代码，如 600519.SH>');
+  if (!opts.code) fail('investigate 需要 --code <代码，如 600519.SH 或 510300.SH>');
   const code = opts.code;
-  // 一次拉齐个股体检常用数据并落盘（indicators 需报告期，另取）
-  const jobs = [
-    ['quote', 'price-snapshot', { thscodes: code }],
-    ['income', 'income-statements', { thscode: code, period: 'quarterly', limit: 4 }],
-    ['balance', 'balance-sheets', { thscode: code, period: 'quarterly', limit: 4 }],
-    ['cashflow', 'cash-flow-statements', { thscode: code, period: 'quarterly', limit: 4 }],
-    ['valuation', 'valuations-snapshot', { thscodes: code }],
-    ['event', 'anomaly-analysis-stock', { thscodes: code }],
-  ];
-  if (opts.report) jobs.push(['indicators', 'financial-indicators', { thscode: code, report: opts.report }]);
-  log(`一键体检 ${code}：`);
-  const results = await Promise.all(jobs.map(async ([type, kind, params]) => {
+  const isFund = position.assetTypeOf(code) === 'etf';
+  // 按 Asia/Shanghai 取日期（sv-SE 输出 YYYY-MM-DD），近 120 天 K 线窗口
+  const d = (n) => new Date(Date.now() - n * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  // 一次拉齐体检常用数据并落盘（indicators 需报告期，另取）
+  const jobs = isFund
+    ? [
+        ['quote', null, null, () => etfQuoteWithFallback(code, d)],
+        ['kline', 'fund-market-historical', { thscode: code, interval: '1d', start: d(120), end: d(0) }],
+        ['profile', 'fund-profile', { thscode: code }],
+        ['returns', 'fund-returns', { thscode: code }],
+        ['drawdowns', 'fund-drawdowns', { thscode: code }],
+        ['holdings', 'fund-holdings', { thscode: code }],
+        ['diagnostics', 'fund-diagnostics', { thscode: code }],
+      ]
+    : [
+        ['quote', 'price-snapshot', { thscodes: code }],
+        ['income', 'income-statements', { thscode: code, period: 'quarterly', limit: 4 }],
+        ['balance', 'balance-sheets', { thscode: code, period: 'quarterly', limit: 4 }],
+        ['cashflow', 'cash-flow-statements', { thscode: code, period: 'quarterly', limit: 4 }],
+        ['valuation', 'valuations-snapshot', { thscodes: code }],
+        ['event', 'anomaly-analysis-stock', { thscodes: code }],
+      ];
+  if (!isFund && opts.report) jobs.push(['indicators', 'financial-indicators', { thscode: code, report: opts.report }]);
+  log(`一键体检 ${code}${isFund ? ' [ETF/场内基金]' : ''}：`);
+  const results = await Promise.all(jobs.map(async ([type, kind, params, custom]) => {
     try {
-      const r = await getData(kind, params);
+      const r = custom ? await custom() : await getData(kind, params);
       if (r && r.code !== undefined && r.code !== 0) throw new Error(`code=${r.code} ${r.message}`);
       const f = cache.saveStock({ code, type, data: r.data ?? r });
-      return { type, ok: true, file: path.basename(f) };
+      return { type, ok: true, file: path.basename(f), note: r?.source };
     } catch (e) {
       return { type, ok: false, err: e.message };
     }
   }));
   for (const x of results) log(x.ok ? `  ✔ ${x.type.padEnd(10)} ${x.file}` : `  ✗ ${x.type.padEnd(10)} ${x.err}`);
+  for (const x of results) if (x.note) log(`  ℹ ${x.type} 数据来源: ${x.note}`);
   log(`  完成: ${results.filter((x) => x.ok).map((x) => x.type).join('、')}`);
-  log(`  财务指标另取: data --kind financial-indicators --thscode ${code} --report YYYY-N（或用 --report 一并取）`);
+  if (isFund) log(`  提示: 基金数据为定期披露口径；再取净值序列 data --kind fund-nav --thscode ${code} --range year`);
+  else log(`  财务指标另取: data --kind financial-indicators --thscode ${code} --report YYYY-N（或用 --report 一并取）`);
 }
 
 // ── 一键每日复盘快照：node cli.js daily-snapshot [--date D] ──
@@ -465,8 +501,9 @@ async function cmdPosition(argv) {
       log(`持仓列表（初始本金 ${formatYuan(r.initialCapital)}${r.cash ? ` | 现金 ${formatYuan(r.cash)}` : ''}）:`);
       if (!r.rows.length) { log('  （暂无持仓，用 position add 建仓）'); return; }
       for (const x of r.rows) {
-        log(`  ${x.code.padEnd(10)} ${(position.assetTypeOf(x.code) === 'etf' ? '[ETF]' : '     ')} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatYuan(x.price)} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
+        log(`  ${x.code.padEnd(10)} ${(position.assetTypeOf(x.code) === 'etf' ? '[ETF]' : '     ')} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatYuan(x.price)}${x.quoteMissing ? '(缺行情,按成本价)' : ''} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
       }
+      if (r.missing?.length) log(`  ⚠ 未取到行情、按成本价计算（浮盈记为 0，非真实盈亏）: ${r.missing.join(', ')}`);
       return;
     }
     case 'summary': {
@@ -476,6 +513,7 @@ async function cmdPosition(argv) {
       log(`  证券市值 ${formatYuan(s.marketValueC)} | 现金 ${formatYuan(s.cash)} | 总资产 ${formatYuan(s.totalAssetsC)}`);
       if (s.repoCount) log(`  逆回购 ${s.repoCount} 笔 占用 ${formatYuan(s.repoPrincipalC)} | 预期收益 ${formatYuan(s.repoInterestC)} | 已结算累计收益 ${formatYuan(s.repoPnlC)}`);
       log(`  浮动盈亏 ${formatYuan(s.floatPnl)} | 已实现 ${formatYuan(s.realizedPnl)} | 合计盈亏 ${formatYuan(s.totalPnl)}`);
+      if (s.missing?.length) log(`  ⚠ 未取到行情、按成本价计入市值（浮盈偏低是假象，非真实盈亏）: ${s.missing.join(', ')}`);
       return;
     }
     case 'today': {
@@ -597,6 +635,11 @@ data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --tag cn_concept|industry / --tag-codes LIMIT_UP,SHARP_FALL（异动标签）
   --start-date --end-date（热榜走势日期）
   --board-type all|org|hot_money / --page / --size / --sort-field / --sort-dir
+ETF/基金参数: --thscode 510300.SH（ETF/基金单只）
+  --dump daily-k|daily-k-10d|adjustment-factors（全市场导出下载链接）
+  --nav-type unit|adj|unit,adj / --range week|month|tmonth|hyear|year|twoyear|tyear|fyear
+  --report-type --report-period --subscribe --manager-id --company-id
+  ↑ 每个端点的必填/枚举/示例：data --kind <端点> --help
 
   position       init --capital N | add --code X --shares N --price P
                  [--name --date --note --psych --fee N | --auto-fee [--account 名称]]
@@ -643,6 +686,9 @@ export async function main() {
       stage: { type: 'string' }, exchange: { type: 'string' }, 'asset-type': { type: 'string' },
       from: { type: 'string' }, to: { type: 'string' },
       'tag-codes': { type: 'string' }, 'start-date': { type: 'string' }, 'end-date': { type: 'string' },
+      dump: { type: 'string' }, 'nav-type': { type: 'string' }, range: { type: 'string' },
+      'report-type': { type: 'string' }, 'report-period': { type: 'string' },
+      subscribe: { type: 'string' }, 'manager-id': { type: 'string' }, 'company-id': { type: 'string' },
     },
   });
 

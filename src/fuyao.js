@@ -68,8 +68,11 @@ export async function dataLinkProbe() {
   return { keyOk, apiKeySource: key ? (process.env.FUYAO_API_KEY || process.env.A_SHARE_API_KEY ? '环境变量' : getConfigSource()) : null, endpointsCount, probe };
 }
 
-// ── 端点映射（已按官方文档 /docs/api-reference/ 填写，2026-08-17 确认）────────
+// ── 端点映射（已按官方文档 /docs/api-reference/ 填写）───────────────────────
+// 2026-08-17 建表；2026-09-17 按官方新增能力扩充（ETF/基金 12 项 + 全市场导出）
 // 所有端点 GET + X-api-key；params.required 用于必填预检（报错带示例命令）
+// params.enum 用于枚举校验；spec.blocked 标记「官方已上线但外部 Key 不可用」
+// path 支持 {name} 占位符（占位参数不进 query string）
 export const ENDPOINTS = {
   'ticker-search': {
     path: '/api/meta/tickers/search', note: '标的检索（名称模糊/代码精确）',
@@ -183,10 +186,85 @@ export const ENDPOINTS = {
     path: '/api/a-share-index/prices/historical', note: '指数历史K线',
     params: { required: ['thscode', 'interval', 'start', 'end'], example: '--kind index-price-historical --thscode 000001.SH --interval 1d --start 2026-08-01 --end 2026-08-17', warn: 'interval 必须显式传，当前仅支持 1d' },
   },
+  // ── ETF / 场内基金（A股快照与三表都不支持 ETF，走 fund/* ）──────────────
   // ETF 行情：A股 price-snapshot 不支持 ETF，场内基金走此端点（仅 ETF，单只）
   'fund-market-snapshot': {
     path: '/api/fund/market/snapshot', note: '场内基金(ETF)行情快照',
-    params: { required: ['thscode'], example: '--kind fund-market-snapshot --thscode 510300.SH', warn: '仅支持 ETF；A股行情请用 price-snapshot' },
+    params: { required: ['thscode'], example: '--kind fund-market-snapshot --thscode 510300.SH', warn: '仅支持 ETF；A股行情请用 price-snapshot；偶发 code=3002(数据未就绪) 属上游未就绪，稍后重试' },
+  },
+  'fund-market-historical': {
+    path: '/api/fund/market/historical', note: 'ETF 历史日线（前复权）',
+    params: { required: ['thscode', 'start', 'end'], example: '--kind fund-market-historical --thscode 510300.SH --interval 1d --start 2026-08-01 --end 2026-09-17', warn: '仅 ETF；单只、窗口最长 5 个自然年；价格恒为前复权（响应 adjust 固定 null 不代表未复权）' },
+  },
+  'fund-profile': {
+    path: '/api/fund/profile/detail', note: '基金/ETF 基本资料（规模/净值/经理/费率）',
+    params: { required: ['thscode'], example: '--kind fund-profile --thscode 510300.SH' },
+  },
+  'fund-returns': {
+    path: '/api/fund/performance/returns', note: '基金/ETF 区间收益（近1周~近5年/今年/成立以来）',
+    params: { required: ['thscode'], example: '--kind fund-returns --thscode 510300.SH' },
+  },
+  'fund-nav': {
+    path: '/api/fund/performance/nav', note: '基金净值序列（单位净值/复权净值）',
+    params: { required: ['thscode'], example: '--kind fund-nav --thscode 510300.SH --range month --nav-type unit', warn: 'range 取 week|month|tmonth|hyear|year|twoyear|tyear|fyear（省略只返回最新一条）；nav_type 取 unit|adj|unit,adj' },
+  },
+  'fund-drawdowns': {
+    path: '/api/fund/performance/drawdowns', note: '基金/ETF 最大回撤（多区间）',
+    params: { required: ['thscode'], example: '--kind fund-drawdowns --thscode 510300.SH' },
+  },
+  'fund-indicators-historical': {
+    path: '/api/fund/performance/indicators-historical', note: '基金历史业绩指标（RSI/通道/估值百分位）',
+    params: { required: ['thscode', 'start', 'end'], example: '--kind fund-indicators-historical --thscode 510300.SH --start 2026-08-01 --end 2026-09-17' },
+  },
+  'fund-holdings': {
+    path: '/api/fund/portfolio/holdings', note: '基金重仓持仓（股票/债券+行业集中度）',
+    params: { required: ['thscode'], example: '--kind fund-holdings --thscode 510300.SH', warn: '定期披露口径，不是实时持仓' },
+  },
+  'fund-asset-allocation': {
+    path: '/api/fund/portfolio/asset-allocation', note: '基金资产配置（股/债/存款/其他）',
+    params: { required: ['thscode'], example: '--kind fund-asset-allocation --thscode 510300.SH' },
+  },
+  'fund-diagnostics': {
+    path: '/api/fund/diagnostics/detail', note: '基金诊断（维度评分/同类对比/韧性）',
+    params: { required: ['thscode'], example: '--kind fund-diagnostics --thscode 510300.SH' },
+  },
+  'fund-holders-top': {
+    path: '/api/fund/holders/top', note: '基金前十大持有人',
+    params: { required: ['thscode'], example: '--kind fund-holders-top --thscode 510300.SH --limit 10', warn: '实测 limit 不裁剪返回条数（含多期披露，可能上百条）；用 report_date_ms 取最新一期' },
+  },
+  'fund-dividends': {
+    path: '/api/fund/corporate-actions/dividends', note: '基金分红记录（权益登记/分红总额）',
+    params: { required: ['thscode'], example: '--kind fund-dividends --thscode 510300.SH' },
+  },
+
+  // ── 全市场数据导出（Parquet 预签名下载链接，URL 约 5 分钟失效）──────────
+  'market-dump-url': {
+    path: '/api/dump/market-dumps/{dump}/download-url', note: '全市场数据导出下载链接（10年日K / 最近10交易日 / 复权因子）',
+    params: {
+      required: ['dump'],
+      enum: { dump: ['daily-k', 'daily-k-10d', 'adjustment-factors'] },
+      example: '--kind market-dump-url --dump daily-k-10d',
+      warn: '返回 S3 预签名链接（5 分钟失效，勿缓存）；文件为 Parquet，需 pyarrow 读取',
+    },
+  },
+
+  // ── 官方文档已有、但外部 API Key 暂不可用（实测 code=2004，同花顺AI客户端专用）──
+  // 列出是为了「快速失败 + 明确告知」，避免 AI 反复试调浪费往返
+  'capital-flow-snapshot': {
+    path: '/api/a-share/capital-flow/snapshot', note: '主力资金实时快照（外部暂不可用）',
+    blocked: '官方已上线但仅对同花顺AI客户端开放，API Key 调用返回 code=2004',
+  },
+  'capital-flow-historical': {
+    path: '/api/a-share/capital-flow/historical', note: '主力资金历史（外部暂不可用）',
+    blocked: '官方已上线但仅对同花顺AI客户端开放，API Key 调用返回 code=2004',
+  },
+  'high-frequency-intraday': {
+    path: '/api/a-share/high-frequency/intraday', note: '高频单日分时（外部暂不可用）',
+    blocked: '官方已上线但仅对同花顺AI客户端开放，API Key 调用返回 code=2004',
+  },
+  'high-frequency-historical': {
+    path: '/api/a-share/high-frequency/historical', note: '高频历史（外部暂不可用）',
+    blocked: '官方已上线但仅对同花顺AI客户端开放，API Key 调用返回 code=2004',
   },
 };
 
@@ -195,11 +273,32 @@ export const ERROR_CODE_HINTS = {
   1001: '缺少必填参数（按示例补全后重试；K线端点须显式传 --interval 1d）',
   1002: '参数取值非法。若报 Unknown thscode，说明该代码无效/不存在——先用 ticker-search 检索确认，或检查指数/板块代码后缀（.SH/.SZ/.TI 等）；若是非交易日/枚举值错误，检查参数',
   1003: '参数超出允许范围（如窗口超 10 年、limit 超上限）',
+  1004: '参数冲突（如 financials 同时传 start/end 与 limit，或只传了 start/end 之一）',
+  2001: '未认证：API Key 缺失或无效——检查 .a-share-assistant/config.json 的 fuyao.apiKey',
+  2003: '权限不足：当前 Key 无权调用该 capability（换端点或找官方开通）',
+  2004: '该数据为同花顺AI客户端专用，外部 API Key 不可用（主力资金/高频动向等）——不要再重试，直接告知用户该数据源不可用',
+  3001: '标的不存在：核对该 thscode（先 ticker-search）',
+  3002: '数据未就绪：标的存在但当前无可用数据（ETF 行情易在收盘结算/停牌时出现）——稍后重试或改用成本价，不要当成 0',
+  3004: '标的类型不支持该能力（如用 A股 price-snapshot 查 ETF、用财务三表查基金）——改用对应 fund-* 端点',
+  4001: '触发限流：降低并发/频率，稍后重试',
+  5001: '服务内部错误，可重试',
+  5002: '上游服务超时，可重试',
+  5003: '上游数据源不可用（部分基金子接口长期返回 5003）——如实告知用户该数据暂不可取',
 };
+
+/** 日期归一化：`YYYY-MM-DD` → Asia/Shanghai 当日零点的毫秒戳（接口只认毫秒戳）；其余原样返回 */
+export function toMsTimestamp(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    return String(Date.parse(`${value}T00:00:00+08:00`));
+  }
+  return value;
+}
 
 /**
  * 通用取数：getData('price-snapshot', { thscodes: '600396.SH' })
  * 必填参数预检：缺失时抛出带示例命令的错误（杜绝静默返回全市场等行为）。
+ * 支持路径占位符（如 /api/dump/market-dumps/{dump}/download-url）与枚举校验；
+ * start/end 传 `YYYY-MM-DD` 会自动转毫秒戳（接口不认日期字符串，实测 code=1002）。
  */
 export async function getData(kind, params = {}) {
   const spec = ENDPOINTS[kind];
@@ -208,18 +307,39 @@ export async function getData(kind, params = {}) {
       `端点 ${kind} 未配置。可用端点: ${Object.keys(ENDPOINTS).join(', ')}`
     );
   }
+  if (spec.blocked) {
+    throw new Error(`端点 ${kind}（${spec.note}）外部不可用：${spec.blocked}。不要重试，如实告知用户该数据源不可用。`);
+  }
+  const p = { ...params };
+  for (const k of ['start', 'end']) {
+    if (p[k] !== undefined && p[k] !== null && p[k] !== '') p[k] = toMsTimestamp(p[k]);
+  }
   const required = spec.params?.required ?? [];
-  const missing = required.filter((r) => params[r] === undefined || params[r] === null || params[r] === '');
+  const missing = required.filter((r) => p[r] === undefined || p[r] === null || p[r] === '');
   if (missing.length > 0) {
     throw new Error(
       `端点 ${kind} 缺少必填参数: ${missing.join(', ')}。示例命令: ${spec.params?.example || spec.path}`
     );
   }
+  // 枚举校验：取值写错时直接报合法值，省一轮往返
+  for (const [name, allowed] of Object.entries(spec.params?.enum ?? {})) {
+    const v = p[name];
+    if (v !== undefined && v !== null && v !== '' && !allowed.includes(String(v))) {
+      throw new Error(`端点 ${kind} 的 ${name} 取值非法: ${v}。合法值: ${allowed.join(' | ')}`);
+    }
+  }
+  // 路径占位符替换（占位参数不进 query string）
+  const usedInPath = new Set();
+  const path = spec.path.replace(/\{(\w+)\}/g, (_, name) => {
+    usedInPath.add(name);
+    return encodeURIComponent(String(p[name]));
+  });
   const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
+  for (const [k, v] of Object.entries(p)) {
+    if (usedInPath.has(k)) continue;
     if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
   }
   const q = qs.toString();
-  const url = `${FUYAO_BASE}${spec.path}${q ? '?' + q : ''}`;
+  const url = `${FUYAO_BASE}${path}${q ? '?' + q : ''}`;
   return fetchJson(url, { method: 'GET', headers: authHeaders() });
 }

@@ -25,20 +25,24 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 链路就绪后允许（且建议）确认参数：`node __PROJECT_ROOT__/src/cli.js data --kind <端点> --help` 输出该端点必填参数与示例；`check` 末尾也有常用参数速查。**"禁考古"只针对链路未就绪时，链路就绪后读参数元数据不算考古。**
 
-**一键体检**：`investigate --code X [--report YYYY-N]` 一次拉齐行情/财务三表/估值/异动并落盘（indicators 需 `--report`，否则另取）——个股体检首选，比逐条 `data` 省多轮往返与 token。
+**一键体检**：`investigate --code X [--report YYYY-N]` 一次拉齐并落盘——**自动判别标的类型**：股票=行情/财务三表/估值/异动；ETF/基金=行情/前复权日线/资料/区间收益/回撤/重仓持仓/诊断（`--report` 仅股票生效）——体检首选，比逐条 `data` 省多轮往返与 token。
 
 | 端点类型 | 参数 | 说明 |
 | :--- | :--- | :--- |
 | 行情/估值/异动/竞价 | `--thscodes 600396.SH,001258.SZ` | **复数、逗号分隔**；price-snapshot 缺 `thscodes` 会返回全市场（接口不报错），务必带并核对 total |
 | 财务三表 | `--thscode X --period annual\|quarterly --limit N` | period 必须是 `annual`/`quarterly`，不是年份 |
 | 财务指标 | `--thscode X --report YYYY-N` | **口径对齐**：与三表取同一报告期（三表最新为 2026 H1 → indicators 用 `2026-2`），避免 Q1 指标 配 Q2 三表 |
-| K线/指数历史 | `--thscode X --interval 1d --start YYYY-MM-DD --end YYYY-MM-DD` | **interval 必须显式传**（接口不认默认值，仅 1d）；日期自动转 Asia/Shanghai 毫秒 |
+| K线/指数历史 | `--thscode X --interval 1d --start YYYY-MM-DD --end YYYY-MM-DD` | **interval 必须显式传**（接口不认默认值，仅 1d）；日期自动转 Asia/Shanghai 毫秒；`--adjust none\|forward\|backward`（默认 forward） |
 | 龙虎榜 | `--board-type all\|org\|hot_money --date YYYY-MM-DD` | date 省略取最近交易日 |
 | 板块 | `--tag cn_concept\|industry` | THS 概念/行业目录 |
+| **ETF/基金** | `--thscode 510300.SH`（**单只、不复数**） | ETF 行情/日线/资料/收益/净值/回撤/持仓/诊断；A股端点查 ETF 会报 `code=3004` |
+| **全市场导出** | `--dump daily-k\|daily-k-10d\|adjustment-factors` | 返回 Parquet 预签名链接（5 分钟有效，**不要缓存**）；需 pyarrow 读 |
+
+> 每个端点的必填项/枚举/示例/坑：`data --kind <端点> --help`（无需取数，最省 token 的参数确认方式）。
 
 **Windows 备忘（仅 Windows 环境需要，Linux/macOS 忽略）**：① node 内联脚本 `import` 本地文件绝对路径必须用 `file:///` 前缀（否则 `ERR_UNSUPPORTED_ESM_URL_SCHEME`）；② pwsh 传 JSON 字符串用**单引号**（双引号内 `\"` 不是转义符）→ 写临时脚本优先单引号。
 
-## 数据源分工（按官方文档实测，2026-08-17）
+## 数据源分工（按官方文档实测，2026-08-17 建表 / 2026-09-17 扩充）
 
 | 数据 | 来源（端点 type） | 缓存类型 | 说明 |
 | :--- | :--- | :--- | :--- |
@@ -56,10 +60,18 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | 板块/题材 | ths-index-list（tag=cn_concept/industry）+ index-constituents | sectors | **板块代理：THS概念/行业指数** |
 | 指数行情 | index-price-snapshot / index-price-historical | index | 大盘参照 |
 | 交易日历 | trading-days | — | 判断是否交易日 |
+| **ETF 行情** | fund-market-snapshot / fund-market-historical | stock:<code>:quote / kline | 快照偶发 `code=3002`（未就绪）；日线为**前复权**、窗口≤5年；台账取价会自动兜底到最近日线收盘 |
+| **ETF/基金 画像** | fund-profile / fund-returns / fund-nav / fund-drawdowns / fund-indicators-historical | stock:<code>:profile / returns / nav / drawdowns | 规模净值经理费率、近1周~近5年区间收益、净值序列、多区间最大回撤、RSI/通道/估值百分位 |
+| **ETF/基金 持仓** | fund-holdings / fund-asset-allocation / fund-holders-top / fund-dividends | stock:<code>:holdings | 重仓股+行业集中度、股债配置、前十大持有人（含多期披露，按 report_date_ms 取最新）、分红记录 |
+| **基金诊断** | fund-diagnostics | stock:<code>:diagnostics | 维度评分/同类对比/韧性 |
+| **全市场导出** | market-dump-url（dump=daily-k/daily-k-10d/adjustment-factors） | — | Parquet 预签名链接（**5 分钟失效，禁止缓存/持久化**） |
 | 新闻/公告 | **无 A 股新闻/公告接口** → 用 web 搜索兜底 | news | TTL 1h |
-| 股东/质押 | **无 A 股股东接口**（仅基金有） → 数据不可用 | — | 如实告知用户 |
+| 股东/质押 | **无 A 股股东接口**（仅基金有 holders） → 数据不可用 | — | 如实告知用户 |
+| 主力资金/高频动向 | **外部不可用**（官方仅对同花顺AI客户端开放，实测 `code=2004`） | — | 别再试调；如实告知"该数据源当前拿不到" |
+| 期货/期权/QDII/基金经理 | **未接入** | — | 本项目只做 A股 + ETF/场外基金；用户问起如实说明 |
 
 > 问财 SkillHub CLI 在 Windows 上安装需 git-bash/WSL，v0.1 以 fuyao API 为主干；问财能力作为增强项，环境就绪后接入。取数统一走 node fetch（本机 schannel TLS 不可用）。
+> **错误码对照**：`1001` 缺参 / `1002` 参数格式错（日期必须毫秒戳，CLI 已自动转）/ `1003` 越界 / `2001` key 无效 / `2003` 无权限 / `2004` 仅同花顺AI客户端可用 / `3001` 标的不存在 / `3002` 数据未就绪（ETF 快照常见，稍后重试或兜底，**不要当 0**）/ `3004` 标的类型不支持（ETF 走了股票端点）/ `4001` 限流 / `5003` 上游数据源不可用（部分基金子接口长期如此）。
 
 ### 端点 kind ↔ 缓存类型映射（--kind 与 --save 是两码事）
 
@@ -76,6 +88,10 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | hot-stock-list / skyrocket-list | hot-stock | 热榜 |
 | ths-index-list | sectors | 板块 |
 | index-price-snapshot / index-price-historical | index | 指数 |
+| fund-market-snapshot | quote | ETF 实时行情 |
+| fund-market-historical | kline | ETF 前复权日线 |
+| fund-profile / fund-returns / fund-nav / fund-drawdowns / fund-diagnostics | profile / returns / nav / drawdowns / diagnostics | 基金画像（各存各的，勿互相覆盖） |
+| fund-holdings / fund-asset-allocation / fund-holders-top / fund-dividends | holdings / allocation / holders / dividends | 基金持仓与持有人 |
 
 ## 缓存协议细则
 
@@ -92,12 +108,12 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 
 ## 复盘模板
 
-模板文件：`__PROJECT_ROOT__/templates/review-template.md`（每日复盘模板：大盘环境 / 主线与热点 / 涨停数据 / 龙虎榜 / 今日操作回顾 / 交易心理复盘 / 认知增量 / 明日计划——融资融券已去，无数据源不保留板块）。
+模板文件：`__PROJECT_ROOT__/templates/review-template.md`（每日复盘模板：大盘环境 / 主线与热点 / 涨停数据 / 龙虎榜 / 今日操作回顾 / 交易心理复盘 / 认知增量 / 明日计划 / 明日预测与次日回测——融资融券已去，无数据源不保留板块）。**模板内容按用户自己的模板还原，不要自行增删章节或改写措辞。**
 
 生成复盘笔记时：**先用 `read` 读取模板**，按当天数据填充。
 
 **AI 只填"数据可查"板块**：一~四（大盘环境、主线热点、涨停数据、龙虎榜）——用 fuyao 数据 + 网络检索填充。
-**个人主观板块留空**：五~八（今日操作回顾、交易心理复盘、认知增量、明日计划+铁律）——这些是用户自己的交易记录/判断，**AI 不臆造、不替写**，标注"请用户填写"或留空。
+**个人主观板块留空**：五~九（今日操作回顾、交易心理复盘、认知增量、明日计划、明日预测与次日回测）——这些是用户自己的交易记录/判断，**AI 不臆造、不替写**，标注"请用户填写"或留空；用户明确要求时才能给出带「AI 观点，非仓库已有」标注的草案。
 输出到 `{{cwd}}/复盘/YYYY-MM-DD.md`；数据不可用的字段如实标注"暂无"，不编造。
 
 ## 交易台账（position）
@@ -121,7 +137,7 @@ node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台
 
 **进阶**：
 - **多账户**：`--account 名称` 隔离持仓/本金（`portfolio.<名称>.json`），费率与 `feeProfiles` 联动。
-- **ETF**：与股票同法记账（代码如 `510300`）；行情自动走场内基金接口（A股快照不支持 ETF），列表标 `[ETF]`。
+- **ETF**：与股票同法记账（代码如 `510300`）；行情自动走场内基金接口（A股快照不支持 ETF），列表标 `[ETF]`。快照未就绪（`code=3002`）时自动退回最近一根前复权日线收盘价，仍取不到则按成本价并**打印"缺行情"告警**——出现告警时必须向用户说明"浮盈为假象，非真实盈亏"。
 - **现金**：`position cash --amount N` 记录现金余额。
 - **逆回购**：`position repo add --amount N --rate R [--days D] [--code 204001]` 记录（年化利率%，到期收益按 `金额×利率×天数/365` 精确到分）；`repo list [--all]` 查看；`repo settle --id N` 结算（本金+收益回笼现金）。`summary` 的**总资产 = 证券市值 + 现金 + 未结算逆回购本金**。
 - **除息调整**：`position adjust --code X` 按**持有期内**分红下调成本（浮盈更贴合券商；持有前分红不调）。
@@ -146,6 +162,17 @@ node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台
 3. 股东（户数变化/十大流通股东）
 4. 公告与新闻
 5. 输出结论：**通过/否决** + 理由清单
+
+### ETF / 基金体检（持有或候选标的）
+1. `investigate --code 510300.SH` 一次拉齐（行情 + 前复权日线 + 资料 + 收益 + 回撤 + 持仓 + 诊断）
+2. 补齐：`data --kind fund-nav --thscode X --range year`（净值曲线）、`fund-indicators-historical`（RSI/通道/估值百分位）
+3. 输出：**规模与费率**（有无清盘风险/费率高低）、**跟踪与集中度**（重仓股+行业集中度）、**区间收益与最大回撤**（横向对比同类）、**持有人结构**（机构占比）、结论：**可持有/换更优标的** + 理由
+4. 口径声明：持仓/持有人为**定期披露**，非实时持仓
+
+### 离线回测取数（全市场）
+1. `data --kind market-dump-url --dump daily-k`（10 年全市场日K）或 `daily-k-10d`（最近 10 交易日增量）、`adjustment-factors`（复权因子）
+2. 链接 **5 分钟失效**：拉链接后立即下载，不要把 URL 写进笔记/缓存
+3. Parquet 读取需 `pyarrow`；A股价格为**未复权**，复权需自行合并复权因子
 
 ### 收盘复盘
 1. 快照 limit-up / dragon-tiger / sectors
