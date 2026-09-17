@@ -17,6 +17,7 @@
 | 个股与 ETF 体检 | `investigate` 自动判别标的类型：股票走财务三表+指标+估值+异动，ETF 走资料+收益+回撤+持仓+诊断；一票否决式排雷，结论带数据时间戳 |
 | 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进笔记库 |
 | 交易台账 | 记录本金、建仓/加仓/卖出、每笔心理备注（**股票 / ETF / 国债逆回购**）→ `position`，AI 对话记账，复盘"操作回顾"自动引用 |
+| 持仓股分析 | 台账持仓的「成本 / 止损 / 目标 / 买入区」vs 当日真实行情（开高低收）→ 逐只判定**可低吸 / 止盈 / 止损预警 / 持有观察** + 操作取向；输出终端表格、Markdown 片段（贴进复盘笔记）与**单文件 HTML 报告**（涨红跌绿、ECharts 内联，断网可开） |
 
 > 官方另有「主力资金」「高频动向」等能力，目前仅对同花顺 AI 客户端开放（外部 Key 调用返回 `code=2004`），本插件不做无谓重试。
 
@@ -89,6 +90,8 @@ node src/cli.js position add --code X --shares N --price P [--psych "心理备�
 node src/cli.js position sell --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee]  # 减仓/清仓（自动算已实现盈亏）
 node src/cli.js position psych --code X --text "复盘：这笔追高"  # 给某笔补心理备注
 node src/cli.js position list | summary | today                 # 持仓/总览/当日流水
+node src/cli.js position plan --code 600129 --stop 13.30 --target 15.00 --zone 13.00-13.60  # 记录计划参数
+node src/cli.js position review                                 # 持仓股分析（分组判定 + Markdown + HTML 报告）
 node src/cli.js daily-snapshot [--date D]                       # 一键每日复盘快照（涨停/龙虎榜/板块/指数等落盘）
 ```
 
@@ -105,5 +108,7 @@ node src/cli.js daily-snapshot [--date D]                       # 一键每日�
 ## License
 
 MIT
+
+内置第三方资源：`assets/echarts.min.js`（Apache ECharts 5.5.1，Apache-2.0），仅用于让持仓分析 HTML 报告**离线自包含地出图**；详见 [`assets/README.md`](./assets/README.md)。
 
 

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getData } from './fuyao.js';
 import { homeDir, getFeeProfile } from './config.js';
-import { toCents, formatYuan } from './money.js';
+import { toCents, formatYuan, toMilli, formatMilli, milliTimesSharesToCents } from './money.js';
 
 const FILE_NAME = 'portfolio.json';
 
@@ -80,8 +80,9 @@ export function assetTypeOf(code) {
   return 'stock';
 }
 
-/** 建仓 / 加仓（fee/price 按"元"传入，内部转分） */
-export function addPosition({ code, name = '', shares, price, date, time = '', note = '', psych = '', fee = 0, account }) {
+/** 建仓 / 加仓（fee/price 按"元"传入，内部转分）
+ *  stop/target/zoneLow/zoneHigh = 计划参数（元，可选）：止损价 / 第一目标价 / 计划买入区，供持仓分析判定 */
+export function addPosition({ code, name = '', shares, price, date, time = '', note = '', psych = '', fee = 0, stop, target, zoneLow, zoneHigh, account }) {
   const p = loadPortfolio(account);
   const sh = Math.floor(Number(shares));
   if (!Number.isFinite(sh) || sh <= 0) throw new Error('股数必须为正数');
@@ -102,16 +103,52 @@ export function addPosition({ code, name = '', shares, price, date, time = '', n
     existing.openDate = existing.openDate || date || new Date().toISOString().slice(0, 10);
     if (!existing.name && name) existing.name = name;
     if (note) existing.note = (existing.note ? existing.note + '；' : '') + note;
+    applyPlan(existing, { stop, target, zoneLow, zoneHigh });
   } else {
     p.positions[key] = {
       code: key, name: name || key, shares: sh,
       avgCost: Math.round(costC / sh), cost: costC,
       openDate: date || new Date().toISOString().slice(0, 10), note,
     };
+    applyPlan(p.positions[key], { stop, target, zoneLow, zoneHigh });
   }
   p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares: sh, price: priceC, amount: amountC, fee: feeC, date: date || new Date().toISOString().slice(0, 10), time, note, psych, realizedPnl: null });
   savePortfolio(p, account);
   return p.positions[key];
+}
+
+/** 计划参数写入持仓（**厘**存储，ETF 三位小数不丢精度；未传的字段不改动） */
+function applyPlan(pos, { stop, target, zoneLow, zoneHigh }) {
+  const set = (field, v) => {
+    if (v === undefined || v === null || v === '') return;
+    const m = toMilli(v);
+    if (m > 0) pos[field] = m;
+  };
+  set('stopMilli', stop);
+  set('targetMilli', target);
+  set('zoneLowMilli', zoneLow);
+  set('zoneHighMilli', zoneHigh);
+  return pos;
+}
+
+/** 给已有持仓补/改计划参数（止损/目标/买入区）；传 0 表示清除该字段 */
+export function setPlan({ code, stop, target, zoneLow, zoneHigh, account }) {
+  const p = loadPortfolio(account);
+  const key = String(code);
+  const pos = p.positions[key];
+  if (!pos) throw new Error(`未持有 ${key}，无法设置计划参数（先 position add）`);
+  const clr = (field, v) => {
+    if (v === undefined || v === null || v === '') return;
+    const m = toMilli(v);
+    if (m <= 0) delete pos[field];
+    else pos[field] = m;
+  };
+  clr('stopMilli', stop);
+  clr('targetMilli', target);
+  clr('zoneLowMilli', zoneLow);
+  clr('zoneHighMilli', zoneHigh);
+  savePortfolio(p, account);
+  return pos;
 }
 
 /** 减仓 / 清仓 */
@@ -234,16 +271,17 @@ export async function adjustForDividends(code, account) {
   return { adjusted: true, totalDivC: divC, avgBefore, avgAfter: pos.avgCost };
 }
 
-/** 拉取持仓现价（分）。返回 { prices, missing } —— missing=未取到行情的代码，
+/** 拉取持仓现价（**厘**，0.001 元；ETF 报价最小变动 0.001，用分记价会失真）。
+ *  返回 { pricesMilli, missing } —— missing=未取到行情的代码，
  *  调用方必须把「按成本价兜底」这件事告诉用户，不能让 0 浮盈冒充真实盈亏。 */
 async function fetchPrices(codes) {
-  const prices = {};
+  const pricesMilli = {};
   const missing = [];
-  if (!codes.length) return { prices, missing };
+  if (!codes.length) return { pricesMilli, missing };
   // 同时登记裸代码与带后缀代码，避免台账代码格式与接口回包不一致导致取不到价
-  const put = (code, it, priceC) => {
-    if (!priceC) return;
-    for (const k of [code, it?.ticker, it?.thscode]) if (k) prices[String(k)] = priceC;
+  const put = (code, it, milli) => {
+    if (!milli) return;
+    for (const k of [code, it?.ticker, it?.thscode]) if (k) pricesMilli[String(k)] = milli;
   };
   // 股票/指数走 A股快照（批量）
   const stocks = codes.filter((c) => assetTypeOf(c) !== 'etf');
@@ -252,62 +290,68 @@ async function fetchPrices(codes) {
       const res = await getData('price-snapshot', { thscodes: stocks.map(toThscode).join(',') });
       for (const it of res?.data?.item ?? []) {
         const hit = stocks.find((c) => String(c) === String(it.ticker) || String(c) === String(it.thscode));
-        put(hit ?? it.ticker, it, toCents(Number(it.last_price) || 0));
+        put(hit ?? it.ticker, it, toMilli(it.last_price));
       }
     } catch { /* 忽略，缺失的用成本价并计入 missing */ }
   }
   // ETF 走场内基金快照（单只；偶发 code=3002 数据未就绪）
   for (const e of codes.filter((c) => assetTypeOf(c) === 'etf')) {
-    let priceC = 0;
+    let milli = 0;
     let it = null;
     try {
       const res = await getData('fund-market-snapshot', { thscode: toThscode(e) });
       it = res?.data?.item?.[0] ?? null;
-      if (it) priceC = toCents(Number(it.last_price) || 0);
+      if (it) milli = toMilli(it.last_price);
     } catch { /* 忽略 */ }
-    if (!priceC) {
+    if (!milli) {
       // 快照未就绪 → 退回最近一根前复权日线收盘（比直接按成本价报 0 浮盈更诚实）
       try {
         const end = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
         const start = new Date(Date.now() - 10 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
         const res = await getData('fund-market-historical', { thscode: toThscode(e), interval: '1d', start, end });
         const items = res?.data?.item ?? [];
-        if (items.length) priceC = toCents(Number(items[items.length - 1].close_price) || 0);
+        if (items.length) milli = toMilli(items[items.length - 1].close_price);
       } catch { /* 忽略 */ }
     }
-    put(e, it, priceC);
+    put(e, it, milli);
   }
-  for (const c of codes) if (!prices[c]) missing.push(c);
-  return { prices, missing };
+  for (const c of codes) if (!pricesMilli[c]) missing.push(c);
+  return { pricesMilli, missing };
 }
 
-/** 持仓列表（分字段） */
+/** 持仓列表（分字段；priceMilli=厘，price=分，市值/浮盈按厘×股数精确到分） */
 export async function listPositions(account) {
   const p = loadPortfolio(account);
   const codes = Object.keys(p.positions);
-  const { prices: pricesC, missing } = await fetchPrices(codes);
+  const { pricesMilli, missing } = await fetchPrices(codes);
   const rows = codes.map((c) => {
     const pos = p.positions[c];
-    const priceC = pricesC[c] || Number(pos.avgCost);
-    const marketValueC = priceC * pos.shares;
-    const pnlC = Math.round((priceC - Number(pos.avgCost)) * pos.shares);
-    return { ...pos, price: priceC, marketValue: marketValueC, pnl: pnlC, quoteMissing: !pricesC[c], pnlPct: Number(pos.avgCost) ? Math.round((priceC / Number(pos.avgCost) - 1) * 10000) / 100 : 0 };
+    const avgMilli = Number(pos.avgCost) * 10;
+    const priceMilli = pricesMilli[c] || avgMilli;
+    const marketValueC = milliTimesSharesToCents(priceMilli, pos.shares);
+    const pnlC = milliTimesSharesToCents(priceMilli - avgMilli, pos.shares);
+    return {
+      ...pos, priceMilli, price: Math.round(priceMilli / 10), marketValue: marketValueC, pnl: pnlC,
+      quoteMissing: !pricesMilli[c],
+      pnlPct: avgMilli ? Math.round(((priceMilli - avgMilli) / avgMilli) * 10000) / 100 : 0,
+    };
   });
   return { initialCapital: p.initialCapital, cash: p.cash, rows, missing, file: portfolioFile(account) };
 }
 
-/** 总览（分字段；cash 现金；marketValueC 股票市值；totalAssetsC=市值+现金） */
+/** 总览（分字段；cash 现金；marketValueC 证券市值；totalAssetsC=市值+现金+未结算逆回购本金） */
 export async function summary(account) {
   const p = loadPortfolio(account);
   const codes = Object.keys(p.positions);
-  const { prices: pricesC, missing } = await fetchPrices(codes);
+  const { pricesMilli, missing } = await fetchPrices(codes);
   let totalCostC = 0, marketValueC = 0, pnlC = 0;
   for (const c of codes) {
     const pos = p.positions[c];
-    const priceC = pricesC[c] || Number(pos.avgCost);
+    const avgMilli = Number(pos.avgCost) * 10;
+    const priceMilli = pricesMilli[c] || avgMilli;
     totalCostC += Number(pos.cost);
-    marketValueC += priceC * pos.shares;
-    pnlC += Math.round((priceC - Number(pos.avgCost)) * pos.shares);
+    marketValueC += milliTimesSharesToCents(priceMilli, pos.shares);
+    pnlC += milliTimesSharesToCents(priceMilli - avgMilli, pos.shares);
   }
   const realizedC = Math.round(p.history.filter((h) => h.type === 'sell').reduce((s, h) => s + (Number(h.realizedPnl) || 0), 0));
   const repos = p.repos || [];
@@ -321,6 +365,166 @@ export async function summary(account) {
     repoPrincipalC, repoInterestC, repoCount: openRepos.length, repoPnlC: Number(p.repoPnlC) || 0,
     totalAssetsC: marketValueC + (Number(p.cash) || 0) + repoPrincipalC,
     missing, file: portfolioFile(account),
+  };
+}
+
+// ── 持仓股分析（计划参数 vs 当日真实行情）──────────────────────────────────
+// 判定引擎照《复盘模板生成指南》§3：当日最低价 ≤ 买入区上沿 且 收盘 ≥ 止损 → 可低吸；
+// 触/逼第一目标 → 持有止盈；跌破买区下沿/逼近止损 → 观望规避；不换股、不改计划参数。
+
+/** 毫秒戳 → Asia/Shanghai 日期（YYYY-MM-DD） */
+function shDate(ms) {
+  return new Date(Number(ms)).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+}
+
+/** 完整行情快照（含开/高/低/现价/昨收/涨跌幅），按裸代码+ticker+thscode 三重登记。
+ *  注意：快照时间戳在响应信封 data.timestamp 上，不在 item 里——必须并进去，否则判断不出"是否当日实时价" */
+async function fetchQuotes(codes) {
+  const map = {};
+  const put = (key, it, ts) => {
+    if (!it) return;
+    const rec = ts ? { ...it, timestamp: it.timestamp ?? ts } : it;
+    for (const k of [key, it.ticker, it.thscode]) if (k) map[String(k)] = rec;
+  };
+  const stocks = codes.filter((c) => assetTypeOf(c) === 'stock');
+  if (stocks.length) {
+    try {
+      const res = await getData('price-snapshot', { thscodes: stocks.map(toThscode).join(',') });
+      const ts = res?.data?.timestamp;
+      for (const it of res?.data?.item ?? []) {
+        const hit = stocks.find((c) => String(c) === String(it.ticker) || String(c) === String(it.thscode)) ?? it.ticker;
+        put(hit, it, ts);
+      }
+    } catch { /* 缺失走日线兜底 */ }
+  }
+  for (const e of codes.filter((c) => assetTypeOf(c) === 'etf')) {
+    try {
+      const res = await getData('fund-market-snapshot', { thscode: toThscode(e) });
+      put(e, res?.data?.item?.[0] ?? null, res?.data?.timestamp);
+    } catch { /* 缺失走日线兜底 */ }
+  }
+  return map;
+}
+
+/** 取某日（含）前的日线：target=当日或最近一根，prev=前一根（算涨跌幅）。
+ *  股票用未复权价（止损/目标是盘面实际价，前复权会与计划价错位）；ETF 走 fund-market-historical。 */
+async function fetchBars(code, date) {
+  const isEtf = assetTypeOf(code) === 'etf';
+  const from = new Date(Date.parse(date + 'T00:00:00+08:00') - 25 * 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  const params = { thscode: toThscode(code), interval: '1d', start: from, end: date };
+  if (!isEtf) params.adjust = 'none';
+  const res = await getData(isEtf ? 'fund-market-historical' : 'price-historical', params);
+  if (res && res.code !== undefined && res.code !== 0) throw new Error(`code=${res.code} ${res.message}`);
+  const items = (res?.data?.item ?? []).slice().sort((a, b) => a.date_ms - b.date_ms);
+  const upto = items.filter((b) => shDate(b.date_ms) <= date);
+  return { target: upto[upto.length - 1] ?? null, prev: upto[upto.length - 2] ?? null };
+}
+
+/** 计划参数 vs 当日行情 → 分组/徽标/操作取向（对照指南 §3；无计划参数则只做成本盈亏分析）。
+ *  入参与计划价统一用「厘」，避免 ETF 三位小数与分位精度打架。 */
+function classifyPlan({ lowM, highM, closeM }, plan) {
+  const stopM = Number(plan.stopMilli) || 0;
+  const targetM = Number(plan.targetMilli) || 0;
+  const zoneHighM = Number(plan.zoneHighMilli) || 0;
+  const disp = (m) => `¥${formatMilli(m, m % 10 === 0 ? 2 : 3)}`;
+  const hasPlan = Boolean(stopM || targetM || plan.zoneLowMilli || zoneHighM);
+  if (stopM && lowM && lowM <= stopM) {
+    return { group: 'stop', badge: '⚠️ 盘中破止损', action: `盘中已触及止损 ${disp(stopM)}，按纪律离场，破止损不摊平`, level: 0 };
+  }
+  if (stopM && closeM <= Math.round(stopM * 1.02)) {
+    return { group: 'stop', badge: '⚠️ 逼近止损', action: `收盘距止损 ${disp(stopM)} 不足 2%，紧盯盘面，破位即走`, level: 1 };
+  }
+  if (targetM && highM && highM >= targetM) {
+    return { group: 'target', badge: '🎯 触第一目标', action: `盘中已触及目标 ${disp(targetM)}，分批止盈，不追高`, level: 2 };
+  }
+  if (targetM && closeM >= Math.round(targetM * 0.98)) {
+    return { group: 'target', badge: '🎯 逼近目标', action: `收盘距目标 ${disp(targetM)} 不足 2%，可减半仓锁定利润`, level: 3 };
+  }
+  if (zoneHighM && lowM && lowM <= zoneHighM && (!stopM || closeM >= stopM)) {
+    return { group: 'zone', badge: '✅ 回到买入区', action: `当日最低回到买入区上沿 ${disp(zoneHighM)} 以内，计划内可低吸/加仓，不追阳线`, level: 4 };
+  }
+  return {
+    group: 'hold',
+    badge: hasPlan ? '➖ 持有观察' : '➖ 持有观察（未设计划参数）',
+    action: hasPlan ? '未触及计划区间，持仓观察，不追阳线' : '台账未记止损/目标/买入区，仅做成本盈亏分析（position plan 可补）',
+    level: 5,
+  };
+}
+
+/**
+ * 持仓股分析：逐只拉行情（快照 + 当日日线）与计划参数比对，输出分组/触发/操作取向。
+ * - date 默认今天（Asia/Shanghai）；非交易日自动回退到最近一根日线
+ * - 计划参数（stopC/targetC/zoneLowC/zoneHighC）缺失时只做成本盈亏分析
+ */
+export async function analyzeHoldings({ date, account } = {}) {
+  const p = loadPortfolio(account);
+  const day = date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  const codes = Object.keys(p.positions);
+  const [quotes, barsList] = await Promise.all([
+    fetchQuotes(codes),
+    Promise.all(codes.map(async (c) => {
+      try { return [c, await fetchBars(c, day)]; } catch (e) { return [c, { error: e.message }]; }
+    })),
+  ]);
+  const bars = Object.fromEntries(barsList);
+  const rows = [];
+  const pct = (a, b2) => (b2 ? Math.round(((a - b2) / b2) * 10000) / 100 : null);
+  for (const c of codes) {
+    const pos = p.positions[c];
+    const q = quotes[c] || null;
+    const b = bars[c] || {};
+    const bar = b.target || null;
+    // 快照仅在其日期 == 分析日时可用（否则是隔日数据，避免把旧价当当日）
+    const snapFresh = q && q.timestamp && shDate(q.timestamp) === day;
+    const pick = (k) => (snapFresh ? toMilli(q[k]) : bar ? toMilli(bar[k]) : 0);
+    const priceMilli = pick('last_price') || (bar ? toMilli(bar.close_price) : 0);
+    const openMilli = pick('open_price');
+    const highMilli = pick('high_price');
+    const lowMilli = pick('low_price');
+    const prevMilli = snapFresh ? toMilli(q.prev_price) : b.prev ? toMilli(b.prev.close_price) : 0;
+    const plan = { stopMilli: pos.stopMilli, targetMilli: pos.targetMilli, zoneLowMilli: pos.zoneLowMilli, zoneHighMilli: pos.zoneHighMilli };
+    const cls = classifyPlan({ lowM: lowMilli, highM: highMilli, closeM: priceMilli }, plan);
+    const avgMilli = Number(pos.avgCost) * 10;
+    const marketValueC = milliTimesSharesToCents(priceMilli, pos.shares);
+    const floatPnlC = milliTimesSharesToCents(priceMilli - avgMilli, pos.shares);
+    // 涨跌幅优先用数据源原值（厘级价差不足以还原真实涨跌幅）
+    const srcRatio = snapFresh ? Number(q.price_change_ratio_pct) : NaN;
+    rows.push({
+      code: c, name: pos.name || c, isEtf: assetTypeOf(c) === 'etf', shares: pos.shares,
+      avgCost: Number(pos.avgCost), avgMilli, price: Math.round(priceMilli / 10), priceMilli,
+      open: Math.round(openMilli / 10), high: Math.round(highMilli / 10), low: Math.round(lowMilli / 10),
+      openMilli, highMilli, lowMilli, prev: Math.round(prevMilli / 10), prevMilli,
+      changePct: Number.isFinite(srcRatio) ? Math.round(srcRatio * 100) / 100 : pct(priceMilli, prevMilli),
+      marketValue: marketValueC, floatPnl: floatPnlC, floatPnlPct: pct(priceMilli, avgMilli),
+      cost: Number(pos.cost), openDate: pos.openDate, plan,
+      stop: plan.stopMilli || null, target: plan.targetMilli || null, zoneLow: plan.zoneLowMilli || null, zoneHigh: plan.zoneHighMilli || null,
+      distStopPct: plan.stopMilli ? pct(priceMilli, plan.stopMilli) : null,
+      distTargetPct: plan.targetMilli ? pct(priceMilli, plan.targetMilli) : null,
+      group: cls.group, badge: cls.badge, action: cls.action, level: cls.level,
+      hasPlan: Boolean(plan.stopMilli || plan.targetMilli || plan.zoneLowMilli || plan.zoneHighMilli),
+      quoteMissing: !priceMilli,
+      barsError: b.error || null,
+      dataSource: snapFresh ? '实时快照' : bar ? `日线(${shDate(bar.date_ms)})` : '无数据',
+      psych: pos.psych || '', note: pos.note || '',
+    });
+  }
+  const valid = rows.filter((r) => !r.quoteMissing);
+  const sum = (f) => rows.reduce((s, r) => s + (f(r) || 0), 0);
+  const marketValueC = sum((r) => r.marketValue);
+  const floatPnlC = sum((r) => r.floatPnl);
+  const costC = sum((r) => r.cost);
+  const groups = ['stop', 'target', 'zone', 'hold'].map((g) => ({ group: g, rows: rows.filter((r) => r.group === g) })).filter((g) => g.rows.length);
+  return {
+    date: day, account: account || null, rows, groups,
+    summary: {
+      count: rows.length, validCount: valid.length,
+      costC, marketValueC, floatPnlC,
+      floatPnlPct: costC ? Math.round((floatPnlC / costC) * 10000) / 100 : null,
+      cash: Number(p.cash) || 0, initialCapital: p.initialCapital,
+      planMissing: rows.filter((r) => !r.hasPlan).length,
+      missingQuote: rows.filter((r) => r.quoteMissing).map((r) => r.code),
+      groupCounts: Object.fromEntries(groups.map((g) => [g.group, g.rows.length])),
+    },
   };
 }
 

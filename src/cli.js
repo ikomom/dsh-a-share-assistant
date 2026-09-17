@@ -8,7 +8,8 @@ import { stdin as input, stdout as output } from 'node:process';
 import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS, toMsTimestamp } from './fuyao.js';
 import * as cache from './cache.js';
 import * as position from './position.js';
-import { formatYuan, toCents } from './money.js';
+import { buildHoldingsHtml } from './report-html.js';
+import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
@@ -85,6 +86,7 @@ async function cmdCheck(opts = {}) {
   log('  ETF/基金:       --thscode 510300.SH（单只）；fund-market-historical/fund-profile/fund-returns/fund-nav/fund-drawdowns/fund-holdings/fund-diagnostics');
   log('  全市场导出:     --kind market-dump-url --dump daily-k|daily-k-10d|adjustment-factors（Parquet 链接 5 分钟失效）');
   log('  ⛔ 不可用:       主力资金/高频动向（官方仅对同花顺AI客户端开放，code=2004）——不要试调');
+  log('  持仓股分析:      position review（成本/止损/目标/买入区 vs 当日行情 → 分组判定 + HTML 报告）');
   log('提示: 端点详细参数用 `node src/cli.js data --kind <端点> --help` 查询');
 }
 
@@ -373,6 +375,110 @@ async function cmdDailySnapshot(opts) {
   log(`  复盘时用 cache latest --type <limit-up|dragon-tiger|sectors|hot-stock|index|...> 读取`);
 }
 
+// ── 持仓股分析：node cli.js position review [--date D] [--html|--no-html] [--out 路径] [--no-md] ──
+/** 解析 --zone 8.65-8.85 / 8.65~8.85 / 8.65（单值=上沿） */
+function parseZone(v) {
+  if (v === undefined || v === null || v === '') return { low: undefined, high: undefined };
+  const m = String(v).split(/[-~,，]/).map((x) => x.trim()).filter(Boolean);
+  if (!m.length) return { low: undefined, high: undefined };
+  return { low: m.length > 1 ? m[0] : undefined, high: m.length > 1 ? m[1] : m[0] };
+}
+
+function planText(pos) {
+  const bits = [];
+  const pm = (m) => formatMilli(m, m % 10 === 0 ? 2 : 3);
+  if (pos.zoneLowMilli || pos.zoneHighMilli) bits.push(`买入区 ${pos.zoneLowMilli ? pm(pos.zoneLowMilli) : '?'}-${pos.zoneHighMilli ? pm(pos.zoneHighMilli) : '?'}`);
+  if (pos.targetMilli) bits.push(`目标 ${pm(pos.targetMilli)}`);
+  if (pos.stopMilli) bits.push(`止损 ${pm(pos.stopMilli)}`);
+  return bits.length ? bits.join(' ｜ ') : '（无计划参数）';
+}
+
+const yuanOr = (v) => (v === null || v === undefined || v === '' ? '—' : formatYuan(v));
+const pctOr = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v}%`);
+/** 行情价（厘）→ 元字符串：ETF/基金三位小数，股票两位 */
+const priceOr = (milli) => (milli === null || milli === undefined || milli === '' ? '—' : formatMilli(milli, Number(milli) % 10 === 0 ? 2 : 3));
+// 中文占 2 列的显示宽度对齐（padEnd 按字符数会错位）
+const dispWidth = (s) => [...String(s)].reduce((n, ch) => n + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1), 0);
+const padDisp = (s, n) => String(s) + ' '.repeat(Math.max(0, n - dispWidth(s)));
+const padStartDisp = (s, n) => ' '.repeat(Math.max(0, n - dispWidth(s))) + String(s);
+
+/** 持仓分析的 Markdown 段落（供贴进复盘笔记；不改模板，只产出片段） */
+function reviewMarkdown(a) {
+  const s = a.summary;
+  const L = [];
+  L.push(`## 持仓股分析（${a.date}）`);
+  L.push('');
+  L.push(`> 口径：成本/止损/目标/买入区来自交易台账，行情来自同花顺金融数据 API（${a.rows.some((r) => r.dataSource === '实时快照') ? '实时快照' : '最近交易日日线'}）。判定规则：当日最低 ≤ 买入区上沿且收盘 ≥ 止损 → 可低吸；触/逼第一目标 → 止盈；跌破买区下沿/逼近止损 → 止损预警。只标注「计划 vs 现实」偏差，不换股、不改计划参数。`);
+  L.push('');
+  L.push('| 标的 | 股数 | 成本 | 现价 | 当日 | 止损 | 目标 | 浮动盈亏 | 触发状态 |');
+  L.push('| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |');
+  for (const r of a.rows) {
+    L.push(`| ${r.name}(${r.code})${r.isEtf ? ' ETF' : ''} | ${r.shares} | ${yuanOr(r.avgCost)} | ${priceOr(r.priceMilli)} | ${pctOr(r.changePct)} | ${priceOr(r.stop)} | ${priceOr(r.target)} | ${yuanOr(r.floatPnl)}（${pctOr(r.floatPnlPct)}） | ${r.badge} |`);
+  }
+  L.push('');
+  L.push(`**汇总**：成本 ${yuanOr(s.costC)} ｜ 市值 ${yuanOr(s.marketValueC)} ｜ 浮动盈亏 ${yuanOr(s.floatPnlC)}（${pctOr(s.floatPnlPct)}） ｜ 现金 ${yuanOr(s.cash)}`);
+  L.push('');
+  for (const g of a.groups) {
+    const meta = { stop: '⚠️ 止损预警', target: '🎯 止盈', zone: '✅ 计划买区', hold: '➖ 持有观察' }[g.group];
+    L.push(`**${meta}（${g.rows.length} 只）**`);
+    for (const r of g.rows) {
+      const dist = [r.distStopPct !== null ? `距止损 ${pctOr(r.distStopPct)}` : '', r.distTargetPct !== null ? `距目标 ${pctOr(r.distTargetPct)}` : ''].filter(Boolean).join(' ｜ ');
+      L.push(`- **${r.name}(${r.code})** 现价 ${priceOr(r.priceMilli)}（${pctOr(r.changePct)}）${dist ? ` ｜ ${dist}` : ''} ｜ 操作：${r.action}`);
+    }
+    L.push('');
+  }
+  if (s.planMissing) L.push(`> 提示：${s.planMissing} 只持仓未记止损/目标/买入区，只做了成本盈亏分析——用 \`position plan --code X --stop S --target T --zone A-B\` 补齐后可参与触发判定。`);
+  if (s.missingQuote.length) L.push(`> ⚠️ 未取到行情（按成本价计，浮盈为假象）：${s.missingQuote.join('、')}`);
+  return L.join('\n');
+}
+
+async function cmdPositionReview(o) {
+  const a = await position.analyzeHoldings({ date: o.date, account: o.account });
+  a.generatedAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  const s = a.summary;
+  if (!a.rows.length) {
+    log('（台账无持仓，用 position add 建仓后再做持仓分析）');
+    return;
+  }
+  log(`== 持仓股分析 ${a.date}${o.account ? ' [' + o.account + ']' : ''} ==`);
+  log('代码       名称           股数      成本     现价    当日     止损     目标      浮动盈亏          触发状态');
+  for (const r of a.rows) {
+    log(
+      `${padDisp(r.code, 11)} ${padDisp(r.name || '', 15)} ${padStartDisp(String(r.shares), 6)} ${padStartDisp(yuanOr(r.avgCost), 8)} ${padStartDisp(priceOr(r.priceMilli), 8)} ${padStartDisp(pctOr(r.changePct), 7)} ${padStartDisp(priceOr(r.stop), 8)} ${padStartDisp(priceOr(r.target), 8)} ${padStartDisp(yuanOr(r.floatPnl) + '(' + pctOr(r.floatPnlPct) + ')', 16)}  ${r.badge}${r.quoteMissing ? ' ⚠缺行情' : ''}`
+    );
+  }
+  log('');
+  for (const g of a.groups) {
+    const meta = { stop: '⚠️ 止损预警组', target: '🎯 止盈组', zone: '✅ 计划买区组', hold: '➖ 持有观察组' }[g.group];
+    log(`${meta}（${g.rows.length} 只）`);
+    for (const r of g.rows) log(`  ${r.code} ${r.name}：${r.action}`);
+  }
+  log('');
+  log(`汇总: 持仓 ${s.count} 只（有效行情 ${s.validCount}）| 成本 ${yuanOr(s.costC)} | 市值 ${yuanOr(s.marketValueC)} | 浮动盈亏 ${yuanOr(s.floatPnlC)}(${pctOr(s.floatPnlPct)}) | 现金 ${yuanOr(s.cash)}`);
+  if (s.planMissing) log(`提示: ${s.planMissing} 只未记计划参数（只做成本盈亏分析）——position plan --code X --stop S --target T --zone A-B 补齐后可参与触发判定`);
+  if (s.missingQuote.length) log(`⚠ 未取到行情、按成本价计（浮盈为假象）: ${s.missingQuote.join(', ')}`);
+
+  // Markdown 片段（默认打印，便于贴进复盘笔记）
+  if (!o['no-md']) {
+    log('');
+    log('----- Markdown 片段（可直接贴进复盘笔记）-----');
+    log(reviewMarkdown(a));
+    log('----- 片段结束 -----');
+  }
+  if (o['md-file']) {
+    fs.writeFileSync(o['md-file'], reviewMarkdown(a) + '\n', 'utf8');
+    log(`✔ Markdown 已写入: ${o['md-file']}`);
+  }
+  // HTML 报告（默认生成单文件，--no-html 关闭）
+  if (!o['no-html']) {
+    const file = o.out || path.join(NOTES_ROOT || process.cwd(), '复盘', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, buildHoldingsHtml(a), 'utf8');
+    log(`✔ HTML 报告已生成: ${file}（单文件自包含，ECharts 已内联，断网也能出图）`);
+  }
+  if (o.out && !o['no-html']) return;
+}
+
 // ── 交易台账：node cli.js position <init|add|buy|sell|list|summary|today|query> ──
 // 多维度高级查询：--code 标的 / --from --to 区间 / --type buy|sell / --only profit|loss
 //            --sort date|amount|pnl / --limit N / --group code|month
@@ -409,6 +515,7 @@ async function cmdPositionQuery(o) {
 async function cmdPosition(argv) {
   const sub = argv._[0];
   const o = argv.values;
+  if (o.help) return cmdHelp(); // position --help：打印用法（不执行子命令，避免误触发取数/落盘）
   const num = (v) => (v === undefined || v === '' ? NaN : Number(v));
   switch (sub) {
     case 'init': {
@@ -425,9 +532,22 @@ async function cmdPosition(argv) {
       let feeVal = num(o.fee);
       // estimateFee 返回「分」；addPosition 的 fee 入参是「元」（内部 toCents），故先 /100 转元
       if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account }) / 100;
-      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal, account: o.account });
+      const pl = parseZone(o.zone);
+      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal, stop: o.stop, target: o.target, zoneLow: pl.low, zoneHigh: pl.high, account: o.account });
       log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${formatYuan(pos.avgCost)}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
+      if (pos.stopC || pos.targetC || pos.zoneLowC || pos.zoneHighC) log(`  计划参数: ${planText(pos)}`);
       return;
+    }
+    case 'plan': {
+      if (!o.code) fail('position plan 需要 --code');
+      if (o.stop === undefined && o.target === undefined && o.zone === undefined) fail('position plan 至少给一项: --stop <价> --target <价> --zone <低-高>（传 0 清除该项）');
+      const pl = parseZone(o.zone);
+      const pos = position.setPlan({ code: o.code, stop: o.stop, target: o.target, zoneLow: pl.low, zoneHigh: pl.high, account: o.account });
+      log(`✔ 计划参数已更新: ${pos.code} ${pos.name} —— ${planText(pos)}`);
+      return;
+    }
+    case 'review': {
+      return cmdPositionReview(o);
     }
     case 'sell': {
       if (!o.code) fail('position sell 需要 --code');
@@ -501,7 +621,7 @@ async function cmdPosition(argv) {
       log(`持仓列表（初始本金 ${formatYuan(r.initialCapital)}${r.cash ? ` | 现金 ${formatYuan(r.cash)}` : ''}）:`);
       if (!r.rows.length) { log('  （暂无持仓，用 position add 建仓）'); return; }
       for (const x of r.rows) {
-        log(`  ${x.code.padEnd(10)} ${(position.assetTypeOf(x.code) === 'etf' ? '[ETF]' : '     ')} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatYuan(x.price)}${x.quoteMissing ? '(缺行情,按成本价)' : ''} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
+        log(`  ${x.code.padEnd(10)} ${(position.assetTypeOf(x.code) === 'etf' ? '[ETF]' : '     ')} ${(x.name || '').padEnd(8)} ${x.shares}股 成本${formatYuan(x.avgCost)} 现价${formatMilli(x.priceMilli, x.priceMilli % 10 === 0 ? 2 : 3)}${x.quoteMissing ? '(缺行情,按成本价)' : ''} 市值${formatYuan(x.marketValue)} 盈亏${formatYuan(x.pnl)}(${x.pnlPct}%)`);
       }
       if (r.missing?.length) log(`  ⚠ 未取到行情、按成本价计算（浮盈记为 0，非真实盈亏）: ${r.missing.join(', ')}`);
       return;
@@ -643,6 +763,11 @@ ETF/基金参数: --thscode 510300.SH（ETF/基金单只）
 
   position       init --capital N | add --code X --shares N --price P
                  [--name --date --note --psych --fee N | --auto-fee [--account 名称]]
+                 [--stop 价 --target 价 --zone 低-高（计划参数，供持仓分析判定）]
+                 | plan --code X [--stop S --target T --zone A-B]（给已有持仓补/改计划参数）
+                 | review [--date D] [--out 路径] [--no-html] [--no-md] [--md-file 路径]
+                   持仓股分析：成本/止损/目标/买入区 vs 当日真实行情 → 分组判定 + 操作取向
+                   （默认生成单文件 HTML 报告 + 打印 Markdown 片段；判定照《复盘模板生成指南》§3）
                  | sell --code X --shares N --price P [--date --psych --fee|--auto-fee]
                  | psych --code X --text "..." [--date D] | adjust --code X（除息复权成本调整）
                  | cash --amount N（现金/逆回购）| import --file F | reset --yes | list | summary | today [--date D]
@@ -668,6 +793,8 @@ export async function main() {
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' }, amount: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
+      stop: { type: 'string' }, target: { type: 'string' }, zone: { type: 'string' },
+      'no-html': { type: 'boolean' }, 'no-md': { type: 'boolean' }, 'md-file': { type: 'string' }, out: { type: 'string' },
       from: { type: 'string' }, to: { type: 'string' }, sort: { type: 'string' },
       group: { type: 'string' }, only: { type: 'string' },
       rate: { type: 'string' }, days: { type: 'string' }, id: { type: 'string' }, all: { type: 'boolean' },
