@@ -70,6 +70,17 @@ export function getApiKey() {
   return typeof cfgKey === 'string' && cfgKey.trim() ? cfgKey : null;
 }
 
+// ── 问财（iwencai）渠道：公告 / 新闻等消息面数据源 ──────────────────────────
+// 技能由 iwencai SkillHub 装在 ~/.agents/skills/<slug>/；Key 只从环境变量或本配置读，不落仓库
+export const IWENCAI_BASE = cfg.iwencai?.baseUrl || 'https://openapi.iwencai.com';
+
+export function getIwencaiKey() {
+  const envKey = process.env.IWENCAI_API_KEY;
+  if (envKey) return envKey;
+  const cfgKey = cfg.iwencai?.apiKey;
+  return typeof cfgKey === 'string' && cfgKey.trim() ? cfgKey : null;
+}
+
 export function getWatchlist() {
   return Array.isArray(cfg.watchlist) ? cfg.watchlist : [];
 }

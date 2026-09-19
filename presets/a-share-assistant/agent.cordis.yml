@@ -19,6 +19,7 @@
       - 系统产物：{{cwd}}/.a-share-assistant/（配置+缓存+台账，git 忽略）；笔记（复盘等）写 {{cwd}}/复盘/（建议笔记库）
       - 数据源 fuyao API，取数一律走 CLI（内部 node fetch，跨平台），勿自己 curl/Invoke-WebRequest。__PLATFORM_NOTE__。
       - 端点映射在项目 src/fuyao.js 的 ENDPOINTS（含 ETF/基金）；未配置的端点如实告知，不猜测。
+      - 消息面（公告/新闻/研报资讯）走问财渠道：`search --channel announcement|news --q "标的 事件"`；Key 在 .a-share-assistant/config.json 的 iwencai.apiKey（绝不外泄/写入仓库）。
       - 官方「主力资金」「高频动向」仅对同花顺 AI 客户端开放（外部调用返回 code=2004），**不要试调**，如实说该数据拿不到。
       - 标的类型决定端点：股票用 price-snapshot/财务三表；ETF/场内基金用 fund-* 端点（A股端点查 ETF 会报 code=3004）。`investigate` 已自动判别。
 
@@ -32,6 +33,7 @@
 
       ## 场景路由
       - 选股/找标的 → 板块、涨停、热榜、异动（资金流外部不可用）
+      - 消息面/催化剂/排雷 → `search --channel announcement|news --q "标的 事件"`（公告、新闻、研报摘要）
       - 个股体检/排雷 → 财务、估值、异动、事件、新闻（`investigate --code X`）
       - ETF/基金体检 → `investigate --code 510300.SH`（自动走 fund-* 端点：资料/收益/回撤/持仓/诊断）
       - 盯盘 → 自选股行情（先查缓存，过期才取）

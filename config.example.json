@@ -7,6 +7,10 @@
     "docsUrl": "https://fuyao.aicubes.cn/docs/",
     "apiKey": ""
   },
+  "iwencai": {
+    "baseUrl": "https://openapi.iwencai.com",
+    "apiKey": ""
+  },
   "feeProfiles": {
     "default": {
       "commissionRate": 0.00025,

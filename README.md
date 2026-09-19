@@ -14,6 +14,7 @@
 | 数据能力 | 41 个可用端点：行情快照、历史K线+复权因子、财务三表、财务指标、涨跌停/炸板池、连板天梯、龙虎榜（机构/游资）、热股榜（含历史/个股走势）、异动原因（个股+列表）、集合竞价、估值、板块/概念、指数、交易日历、标的列表、ETF/基金 12 项 |
 | ETF / 基金 | ETF 前复权日线 + 行情快照；基金资料、区间收益、净值、最大回撤、历史业绩指标、重仓持仓、资产配置、诊断、前十大持有人、分红记录——场内 ETF 与场外公募基金都能查 |
 | 全市场导出 | `market-dump-url` 取 10 年全市场日K / 最近 10 交易日日K / 复权因子 Parquet 预签名下载链接（5 分钟有效），适合离线回测与自建库 |
+| 消息面检索 | 问财渠道 `search`：**公告**（沪深北全文 + 交易所原文 PDF 链接）、**新闻/资讯**（官媒/财经媒体/行业站 + 券商研报摘要）——fuyao 没有的消息面，排雷与找催化剂用 |
 | 个股与 ETF 体检 | `investigate` 自动判别标的类型：股票走财务三表+指标+估值+异动，ETF 走资料+收益+回撤+持仓+诊断；一票否决式排雷，结论带数据时间戳 |
 | 复盘报告 | 涨停梯队 / 龙虎榜游资 / 板块热度 → 自动生成 `复盘/YYYY-MM-DD.md` 进笔记库 |
 | 交易台账 | 记录本金、建仓/加仓/卖出、每笔心理备注（**股票 / ETF / 国债逆回购**）→ `position`，AI 对话记账，复盘"操作回顾"自动引用 |
@@ -25,7 +26,8 @@
 
 - **数据源**：同花顺金融数据 API（fuyao.aicubes.cn），HTTP 直连。
 - **缓存**：系统产物（配置 + 缓存 + 台账）放会话工作目录 `.a-share-assistant/`（点开头默认隐藏、git 忽略）；用户产物（复盘笔记）放会话目录可见位置。缓存层：JSON 索引 + 三档保留（近30天散装 → 月zip归档 → 超期删除）、按标的过滤、TTL 过期判定。
-- **API Key**：需在 https://fuyao.aicubes.cn 官网自签，填入 `.a-share-assistant/config.json` 的 `fuyao.apiKey`（**不写进代码/仓库**）。
+- **API Key**：fuyao Key 在 https://fuyao.aicubes.cn 自签，填入 `.a-share-assistant/config.json` 的 `fuyao.apiKey`；**问财 Key**（公告/新闻通道）在 https://www.iwencai.com/skillhub 获取，填入同一文件的 `iwencai.apiKey`（**都不写进代码/仓库**）。
+- **问财技能**：`search` 依赖 iwencai SkillHub 的 `announcement-search` / `news-search` 技能，装在 `~/.agents/skills/`；缺技能时 CLI 报错会给安装命令。
 - **交易台账**：`.a-share-assistant/portfolio.json`（本金/每笔操作/盈亏，个人财务**敏感，留本机 git 忽略**）；复盘笔记写 `复盘/`（知识产物，进笔记库随版本管理）。
 
 ## 安装
@@ -87,6 +89,8 @@ node src/cli.js investigate --code X [--report YYYY-N]   # 一键体检（股票
 node src/cli.js data --kind fund-returns --thscode 510300.SH    # ETF/基金：区间收益
 node src/cli.js data --kind fund-market-historical --thscode 510300.SH --interval 1d --start 2026-08-01 --end 2026-09-17
 node src/cli.js data --kind market-dump-url --dump daily-k-10d  # 全市场日K Parquet 下载链接
+node src/cli.js search --channel announcement --q "贵州茅台 分红公告"   # 公告检索（问财渠道）
+node src/cli.js search --channel news --q "人工智能 政策" --summary     # 新闻/研报资讯
 node src/cli.js position init --capital N                       # 设初始本金
 node src/cli.js position add --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee [--account 名称]]  # 建仓/加仓（加权成本）
 node src/cli.js position sell --code X --shares N --price P [--psych "心理备注" --fee N | --auto-fee]  # 减仓/清仓（自动算已实现盈亏）

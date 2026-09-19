@@ -10,6 +10,7 @@ import * as cache from './cache.js';
 import * as position from './position.js';
 import { buildHoldingsHtml } from './report-html.js';
 import { fetchMarketContext } from './market.js';
+import * as iwencai from './iwencai.js';
 import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
@@ -66,6 +67,9 @@ async function cmdCheck(opts = {}) {
       : '端点映射: ❌ 为空（v0.2 待办，当前无法取真实数据）'
   );
   log(`试调: ${dl.probe.detail}`);
+  // 问财渠道（公告/新闻）：Key + 技能脚本是否就位，属"链路就绪"的一部分，故放在 --quick 也会执行的位置
+  const iwStatus = iwencai.channelStatus();
+  log(`消息面渠道(问财): ${iwStatus.map((x) => `${x.label}${x.keyOk ? (x.installed ? '✅' : '⚠技能未装') : '⚠缺Key'}`).join(' / ')}`);
   const ready = dl.keyOk && dl.endpointsCount > 0 && dl.probe.ok;
   log(ready ? '→ 数据链路就绪，可以取数' : '→ 数据链路未就绪：请先补 key / 端点映射后再取数，不要现场翻源码找接口');
   if (opts.quick) return; // --quick：只看链路就绪，跳过缓存索引与参数速查
@@ -88,6 +92,7 @@ async function cmdCheck(opts = {}) {
   log('  全市场导出:     --kind market-dump-url --dump daily-k|daily-k-10d|adjustment-factors（Parquet 链接 5 分钟失效）');
   log('  ⛔ 不可用:       主力资金/高频动向（官方仅对同花顺AI客户端开放，code=2004）——不要试调');
   log('  持仓股分析:      position review（成本/止损/目标/买入区 vs 当日行情 → 分组判定 + HTML 报告）');
+  log('  消息面(问财):    search --channel announcement|news --q "标的 事件"（公告全文 / 新闻+研报）');
   log('提示: 端点详细参数用 `node src/cli.js data --kind <端点> --help` 查询');
 }
 
@@ -281,6 +286,34 @@ function printDataSummary(result) {
   } else {
     log(`  ${JSON.stringify(data).slice(0, 1000)}`);
   }
+}
+
+// ── 消息面检索（问财渠道）：node cli.js search --channel announcement|news --q "..." ──
+// 公告 = 沪深北公告全文检索（带原文/PDF 链接）；news = 官媒/财经媒体/行业站 + 券商研报摘要
+async function cmdSearch(o) {
+  const channel = o.channel || 'news';
+  if (!iwencai.CHANNELS[channel]) fail(`search 需要 --channel <${Object.keys(iwencai.CHANNELS).join('|')}>（当前: ${channel}）`);
+  if (!o.q) fail('search 需要 --q "<自然语言检索词>"，如 --q "贵州茅台 分红公告"');
+  let r;
+  try {
+    r = await iwencai.search({ channel, query: o.q, size: o.size ? Number(o.size) : 10, includeRaw: !!o.raw });
+  } catch (e) {
+    fail(`检索失败: ${e.message}`);
+  }
+  if (o.save) {
+    const date = o.date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+    const f = cache.saveSnapshot({ type: o.save, date, data: { channel: r.channel, query: r.query, total: r.total, items: r.items } });
+    log(`已检索并缓存: ${f}（${r.label} ${r.items.length}/${r.total} 条）`);
+    return;
+  }
+  if (o.raw && r.raw) { console.log(r.raw); return; }
+  if (o.summary) {
+    log(`${r.label}检索「${r.query}」：共 ${r.total} 条（返回 ${r.items.length}）`);
+    for (const it of r.items) log(`  ${it.date} | ${it.title} | ${it.source}${it.url ? ' | ' + it.url : ''}`);
+    return;
+  }
+  const { raw, ...out } = r;
+  console.log(JSON.stringify(out, null, 2));
 }
 
 // ── 一键体检：node cli.js investigate --code X [--report YYYY-N] ──
@@ -791,6 +824,10 @@ function cmdHelp() {
   investigate    --code X [--report YYYY-N]
                             一键个股体检（拉齐行情/三表/估值/异动并落盘）
   daily-snapshot [--date D]  一键每日复盘快照（涨停/跌停/炸板/连板/龙虎榜/热榜/板块/指数落盘）
+  search         --channel announcement|news --q "标的/主题 自然语言" [--size N]
+                 [--summary | --raw | --save T]
+                             消息面检索（问财渠道）：① 公告全文+原文PDF ② 财经新闻/研报摘要
+                             --raw 输出网关原始 JSON；--save 落缓存；Key 读 config 的 iwencai.apiKey
 
 data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）
@@ -850,6 +887,7 @@ export async function main() {
       'keep-days': { type: 'string' },
       save: { type: 'string' },
       q: { type: 'string' }, thscodes: { type: 'string' }, thscode: { type: 'string' },
+      channel: { type: 'string' }, raw: { type: 'boolean' },
       limit: { type: 'string' }, offset: { type: 'string' }, interval: { type: 'string' },
       start: { type: 'string' }, end: { type: 'string' }, adjust: { type: 'string' },
       period: { type: 'string' }, report: { type: 'string' }, tag: { type: 'string' },
@@ -873,7 +911,8 @@ export async function main() {
   if (cmd === 'investigate') return cmdInvestigate(values);
   if (cmd === 'daily-snapshot') return cmdDailySnapshot(values);
   if (cmd === 'data') return cmdData(values);
-  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|investigate|daily-snapshot|help>（跑 help 看全部用法）');
+  if (cmd === 'search') return cmdSearch(values);
+  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|search|investigate|daily-snapshot|help>（跑 help 看全部用法）');
   process.exitCode = 1;
 }
 

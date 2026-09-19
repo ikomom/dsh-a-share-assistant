@@ -46,6 +46,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | 板块 | `--tag cn_concept\|industry` | THS 概念/行业目录 |
 | **ETF/基金** | `--thscode 510300.SH`（**单只、不复数**） | ETF 行情/日线/资料/收益/净值/回撤/持仓/诊断；A股端点查 ETF 会报 `code=3004` |
 | **全市场导出** | `--dump daily-k\|daily-k-10d\|adjustment-factors` | 返回 Parquet 预签名链接（5 分钟有效，**不要缓存**）；需 pyarrow 读 |
+| **公告**（问财） | `search --channel announcement --q "标的+事件"` | fuyao 没有的消息面；返回标题/日期/来源/原文PDF链接 |
+| **新闻/资讯**（问财） | `search --channel news --q "主题或个股 最新"` | 官媒/财经媒体/行业站 + 券商研报摘要 |
 
 > 每个端点的必填项/枚举/示例/坑：`data --kind <端点> --help`（无需取数，最省 token 的参数确认方式）。
 
@@ -74,7 +76,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | **ETF/基金 持仓** | fund-holdings / fund-asset-allocation / fund-holders-top / fund-dividends | stock:<code>:holdings | 重仓股+行业集中度、股债配置、前十大持有人（含多期披露，按 report_date_ms 取最新）、分红记录 |
 | **基金诊断** | fund-diagnostics | stock:<code>:diagnostics | 维度评分/同类对比/韧性 |
 | **全市场导出** | market-dump-url（dump=daily-k/daily-k-10d/adjustment-factors） | — | Parquet 预签名链接（**5 分钟失效，禁止缓存/持久化**） |
-| 新闻/公告 | **无 A 股新闻/公告接口** → 用 web 搜索兜底 | news | TTL 1h |
+| **公告** | 问财渠道 `search --channel announcement`（iwencai 技能 announcement-search） | announcement | 沪深北公告全文检索 + 原文/PDF 链接；**fuyao 无此能力** |
+| **新闻/资讯** | 问财渠道 `search --channel news`（iwencai 技能 news-search） | news | 官媒/财经媒体/行业站 + 券商研报摘要；题材催化剂的直接来源 |
 | 股东/质押 | **无 A 股股东接口**（仅基金有 holders） → 数据不可用 | — | 如实告知用户 |
 | 主力资金/高频动向 | **外部不可用**（官方仅对同花顺AI客户端开放，实测 `code=2004`） | — | 别再试调；如实告知"该数据源当前拿不到" |
 | 期货/期权/QDII/基金经理 | **未接入** | — | 本项目只做 A股 + ETF/场外基金；用户问起如实说明 |
@@ -97,6 +100,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | hot-stock-list / skyrocket-list | hot-stock | 热榜 |
 | ths-index-list | sectors | 板块 |
 | index-price-snapshot / index-price-historical | index | 指数 |
+| `search --channel announcement` | announcement | 公告（问财） |
+| `search --channel news` | news | 新闻/资讯（问财） |
 | fund-market-snapshot | quote | ETF 实时行情 |
 | fund-market-historical | kline | ETF 前复权日线 |
 | fund-profile / fund-returns / fund-nav / fund-drawdowns / fund-diagnostics | profile / returns / nav / drawdowns / diagnostics | 基金画像（各存各的，勿互相覆盖） |
@@ -158,6 +163,22 @@ node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台
 **对话记账**：用户说「我建仓了茅台 100 股 1500」「加了 50 股 1520」「今天卖了 50 股 1550」「我的本金是 20 万」「今天交易了啥」——AI 用 `position add/sell/init/today` 记录/查询，勿让用户手动抄。
 **交易心理备注**：给每笔交易做心理复盘——`add/sell` 时用 `--psych "计划内/冲动追高"`；对已有交易 `position psych --code X --text "复盘：这笔是FOMO追高" [--date D]`。复盘"操作回顾/交易心理"板块引用这些备注，帮用户对账"当时为什么这么操作"。
 **复盘接入**：复盘"操作回顾"板块从 `position today` 当日流水自动引用（含建仓/卖出与已实现盈亏），用户再补充盈亏感受即可。
+
+## 消息面检索（问财渠道 `search`）
+
+行情/财务/涨停龙虎榜走 fuyao；**公告、新闻、研报资讯走问财渠道**——这是 fuyao 完全没有的一块，也是"消息面"的主要来源。
+
+```bash
+node __PROJECT_ROOT__/src/cli.js search --channel announcement --q "贵州茅台 分红公告" --size 5
+node __PROJECT_ROOT__/src/cli.js search --channel news --q "人工智能 政策 最新" --size 5 --summary
+node __PROJECT_ROOT__/src/cli.js search --channel announcement --q "业绩预告" --save announcement
+```
+
+- **两个通道**：`announcement`（沪深北公告全文 + 上交所/深交所原文 PDF 链接）、`news`（官媒/财经媒体/行业站 + 券商研报摘要）。
+- **检索词写法**：`标的 + 事件类型`（如「宁德时代 减持公告」「半导体 政策」）；一次一个主题，不够再换词，**别把长句塞进去**。
+- **输出**：默认纯 JSON（`items[{date,title,source,url,code,summary}]`，summary 截断 400 字）；`--summary` 人读摘要；`--raw` 网关原始 JSON（排查用）；`--save announcement|news` 落缓存。
+- **Key 与安装**：Key 存在 `.a-share-assistant/config.json` 的 `iwencai.apiKey`（git 忽略，**不要写进笔记/仓库**）；技能装在 `~/.agents/skills/{announcement-search,news-search}`，缺失时按报错里的命令用 iwencai SkillHub CLI 安装。
+- **合规口径**：引用时注明 `数据来源：同花顺问财`，并给原文链接与日期；检索不到就如实说没找到，**不要用记忆替代**。
 
 ## 持仓分析 / 复盘页（position review）
 
