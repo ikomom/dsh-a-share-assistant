@@ -12,7 +12,7 @@ import { buildHoldingsHtml } from './report-html.js';
 import { fetchMarketContext, fetchMarketBreadth, resolveTradingDay } from './market.js';
 import * as iwencai from './iwencai.js';
 import { formatYuan, toCents, formatMilli } from './money.js';
-import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
+import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, reviewDir, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
 export const CLI_VERSION = '0.1.3';
@@ -38,6 +38,7 @@ async function cmdCheck(opts = {}) {
   }
   log(`源码更新于: ${srcMtimes.join(' / ') || '未知'}`);
   log(`笔记库根: ${NOTES_ROOT || '未配置（参照提醒关闭）'}`);
+  log(`复盘目录: ${reviewDir()}（笔记与报告同处；config.reviewDir 可覆盖）`);
   log(`配置来源: ${getConfigSource()}`);
   if (!isConfigPresent()) {
     log('⚠️ [CONFIG_MISSING] 未检测到用户配置文件，如需创建请运行: node src/cli.js config（交互询问）或 config --init / config --template');
@@ -570,10 +571,10 @@ async function cmdPositionReview(o) {
     log(`✔ Markdown 已写入: ${o['md-file']}`);
   }
   // HTML 报告（默认生成单文件，--no-html 关闭）
-  // 默认落 {{cwd}}/复盘/持仓分析/ 子目录，与复盘笔记（{{cwd}}/复盘/YYYY-MM-DD.md）同处一层、按类型归档，
-  // 不把报告平铺在复盘根目录里；--out 可覆盖。
+  // 默认落 {复盘目录}/持仓分析/ 子目录 —— 复盘目录由 config.reviewDir / 自动探测决定（见 config.js reviewDir()），
+  // 与复盘笔记 YYYY-MM-DD.md 同处一层、按类型归档，不把报告平铺在复盘根目录；--out 可覆盖。
   if (!o['no-html']) {
-    const file = o.out || path.join(process.cwd(), '复盘', '持仓分析', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
+    const file = o.out || path.join(reviewDir(), '持仓分析', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, buildHoldingsHtml({ analysis: a, market, events, options: { generatedAt: a.generatedAt } }), 'utf8');
     const sec = [market ? `${market.sectors.gainers.length + market.sectors.losers.length} 个板块` : '', events.length ? `${events.length} 条风险日历` : '风险日历待补'].filter(Boolean).join(' + ');

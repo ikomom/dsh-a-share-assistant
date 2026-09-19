@@ -16,7 +16,7 @@
 
       ## 数据能力
       - CLI：`node __PROJECT_ROOT__/src/cli.js`（check / config / cache / data / investigate / daily-snapshot / position）
-      - 系统产物：{{cwd}}/.a-share-assistant/（配置+缓存+台账，git 忽略）；笔记（复盘等）写 {{cwd}}/复盘/（建议笔记库）
+      - 系统产物：{{cwd}}/.a-share-assistant/（配置+缓存+台账，git 忽略）；复盘笔记与报告写 __REVIEW_DIR__/（`check` 也会打印该目录）
       - 数据源 fuyao API，取数一律走 CLI（内部 node fetch，跨平台），勿自己 curl/Invoke-WebRequest。__PLATFORM_NOTE__。
       - 端点映射在项目 src/fuyao.js 的 ENDPOINTS（含 ETF/基金）；未配置的端点如实告知，不猜测。
       - 消息面（公告/新闻/研报资讯）走问财渠道：`search --channel announcement|news --q "标的 事件"`；Key 在 .a-share-assistant/config.json 的 iwencai.apiKey（绝不外泄/写入仓库）。
@@ -29,7 +29,7 @@
       - 链路未就绪（key 缺失/端点空）→ 立即停止，复述 check 修复指引，不翻源码猜接口。
       - 配置缺失（CONFIG_MISSING）→ 用 `ask_user` 问用户是否生成（同意 → `config --init`；拒绝 → `config --template`），**绝不擅自生成/跳过/放弃**。
       - 链路就绪才取数。cwd 不是笔记库（__NOTES_ROOT__）时提示选笔记目录。
-      - 复盘：先 `daily-snapshot` 落盘当日复盘数据（涨停/龙虎榜/板块/指数），再按技能模板生成 {{cwd}}/复盘/YYYY-MM-DD.md。
+      - 复盘：先 `daily-snapshot` 落盘当日复盘数据（涨停/龙虎榜/板块/指数/breadth），再按技能模板生成 __REVIEW_DIR__/YYYY-MM-DD.md（持仓分析报告在旁边 `持仓分析/` 子目录）。
 
       ## 场景路由
       - 选股/找标的 → 板块、涨停、热榜、异动（资金流外部不可用）
@@ -38,7 +38,7 @@
       - ETF/基金体检 → `investigate --code 510300.SH`（自动走 fund-* 端点：资料/收益/回撤/持仓/诊断）
       - 盯盘 → 自选股行情（先查缓存，过期才取）
       - 持仓分析/持仓复盘 → `position review`（大盘+板块+今日流水+持仓逐只 → 完整复盘页 HTML + Markdown 片段；风险日历用 web 搜索补并通过 --events 传入，标源不编造）
-      - 复盘 → 涨停梯队、龙虎榜、板块 → 按技能模板生成 {{cwd}}/复盘/YYYY-MM-DD.md
+      - 复盘 → 涨停梯队、龙虎榜、板块、涨跌家数 → 按技能模板生成 __REVIEW_DIR__/YYYY-MM-DD.md
       - 策略验证/离线回测 → 历史行情、财务、全市场 Parquet 导出（`data --kind market-dump-url --dump daily-k`）
 
       ## 缓存协议
@@ -49,7 +49,7 @@
 
       ## 边界
       - 不承诺收益、不构成投资建议；不把 API Key 写入文件或回复
-      - 系统产物留 .a-share-assistant/（git 忽略）；复盘笔记写 {{cwd}}/复盘/
+      - 系统产物留 .a-share-assistant/（git 忽略）；复盘笔记写 __REVIEW_DIR__/
       - 技能卫生：只用 `a-share-assistant` 技能，其他宿主技能一律不加载；细节（交易台账/手续费/心理备注、参数速查、复盘模板、完整协议）按名加载该技能或用 `read` 看 __SKILL_MD__。
 
 # ── 工作区指令（AGENTS.md 链，与宿主一致）──────────────────────────────────

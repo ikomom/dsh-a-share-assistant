@@ -60,6 +60,28 @@ export const NOTES_ROOT = (() => {
   return typeof v === 'string' && v.trim() ? path.resolve(v) : null;
 })();
 
+// ── 复盘目录（复盘笔记 + 持仓分析报告 的落盘位置）────────────────────────────
+// 解析顺序：环境变量 A_SHARE_REVIEW_DIR > 配置 reviewDir（相对 noteRoot 或绝对）> 自动探测 > {cwd}/复盘
+// 自动探测：{noteRoot 或 cwd}/学习/金融/复盘（本机实际放复盘笔记的位置）→ 存在就用它。
+// 目的：让 复盘笔记 YYYY-MM-DD.md 与 报告 持仓分析/xxx.html 永远在同一目录，不再分家。
+export function reviewDir() {
+  const asPath = (base, p) => (path.isAbsolute(p) ? p : path.join(base, p));
+  const envDir = process.env.A_SHARE_REVIEW_DIR;
+  if (envDir && envDir.trim()) return path.resolve(envDir);
+  const base = NOTES_ROOT || path.resolve(process.cwd());
+  const cfgDir = cfg.reviewDir;
+  if (typeof cfgDir === 'string' && cfgDir.trim()) return asPath(base, cfgDir.trim());
+  const candidates = [
+    path.join(base, '学习', '金融', '复盘'),
+    path.join(path.resolve(process.cwd()), '学习', '金融', '复盘'),
+    path.join(base, '复盘'),
+  ];
+  for (const c of candidates) {
+    try { if (fs.statSync(c).isDirectory()) return c; } catch { /* 不存在就试下一个 */ }
+  }
+  return path.join(path.resolve(process.cwd()), '复盘');
+}
+
 export const FUYAO_BASE = cfg.fuyao?.baseUrl || 'https://fuyao.aicubes.cn';
 
 // API Key：环境变量优先，其次用户配置；值绝不输出到日志/回复

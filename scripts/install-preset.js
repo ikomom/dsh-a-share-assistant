@@ -44,10 +44,24 @@ const NOTES_ROOT = (typeof (config.noteRoot ?? config.vaultRoot) === 'string' &&
   ? (config.noteRoot ?? config.vaultRoot)
   : null; // 未配置则不替换为路径，persona 中显示"未配置"
 
+// 复盘目录：与 src/config.js 的 reviewDir() 同一套解析顺序
+// （A_SHARE_REVIEW_DIR > config.reviewDir > 探测 {笔记库根}/学习/金融/复盘 > {cwd}/学习/金融/复盘 > {笔记库根}/复盘 > {cwd}/复盘）
+const REVIEW_DIR = (() => {
+  const fromEnv = process.env.A_SHARE_REVIEW_DIR;
+  if (fromEnv && fromEnv.trim()) return path.resolve(fromEnv);
+  const base = path.resolve(NOTES_ROOT || process.env.A_SHARE_HOME || process.cwd());
+  const cfgDir = typeof config.reviewDir === 'string' && config.reviewDir.trim() ? config.reviewDir.trim() : null;
+  if (cfgDir) return path.isAbsolute(cfgDir) ? cfgDir : path.join(base, cfgDir);
+  const cands = [path.join(base, '学习', '金融', '复盘'), path.join(process.cwd(), '学习', '金融', '复盘'), path.join(base, '复盘')];
+  for (const c of cands) { try { if (fs.statSync(c).isDirectory()) return c; } catch { /* 试下一个 */ } }
+  return path.join(process.cwd(), '复盘');
+})();
+
 function replacer(text) {
   return text
     .replaceAll('__PROJECT_ROOT__', PROJECT_ROOT)
     .replaceAll('__CACHE_ROOT__', CACHE_ROOT)
+    .replaceAll('__REVIEW_DIR__', REVIEW_DIR)
     .replaceAll('__NOTES_ROOT__', NOTES_ROOT || '（未配置 noteRoot，工作目录提醒关闭）')
     .replaceAll('__PLATFORM_NOTE__', PLATFORM_NOTE)
     .replaceAll('__SKILL_MD__', path.join(DEST_DIR, 'skills', 'a-share-assistant', 'SKILL.md'));
@@ -82,6 +96,7 @@ console.log(`  项目根: ${PROJECT_ROOT}`);
 console.log(`  配置来源: ${USER_CFG}`);
 console.log(`  缓存目录: ${CACHE_ROOT}`);
 console.log(`  笔记库根: ${NOTES_ROOT}`);
+console.log(`  复盘目录: ${REVIEW_DIR}（笔记与持仓分析报告都写这里；config.reviewDir 可覆盖）`);
 console.log(`  平台: ${PLATFORM}（${PLATFORM_NOTE}）`);
 console.log('');
 console.log('支持矩阵：Windows（本机已验证）/ Linux、macOS（代码跨平台兼容，建议安装后先跑 `node src/cli.js check` 自检）');

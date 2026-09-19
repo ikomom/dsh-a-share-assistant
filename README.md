@@ -47,11 +47,15 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 ```jsonc
 {
   "noteRoot": "你的笔记库目录，如 D:/docs/private-doc 或 ~/notes",
+  "reviewDir": "复盘目录（相对 noteRoot 或绝对路径），复盘笔记与持仓分析报告都写这里；留空则自动探测：{noteRoot}/学习/金融/复盘 → {cwd}/学习/金融/复盘 → {noteRoot}/复盘",
   "cacheRoot": "缓存目录，默认 .a-share-assistant/cache，可留空",
   "fuyao": { "apiKey": "你的 fuyao API Key（必填，行情/财务/复盘主链路）" },
   "iwencai": { "apiKey": "可选：问财 Key（公告/新闻通道，见下）" }
 }
 ```
+
+> **复盘产物落盘约定**：复盘笔记写 `<复盘目录>/YYYY-MM-DD.md`，持仓分析报告写 **`<复盘目录>/持仓分析/持仓分析-YYYY-MM-DD.html`**（同层按类型归档，不平铺）。
+> `node src/cli.js check` 会打印当前解析出的「复盘目录」，`A_SHARE_REVIEW_DIR` 环境变量优先级最高。
 
 ### 可选增强：公告 / 新闻通道（问财）
 
