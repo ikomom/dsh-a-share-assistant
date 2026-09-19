@@ -100,13 +100,28 @@ if (configMissing) {
     if (answer === 'y' || answer === 'yes' || answer === '是') {
       console.log('→ 运行 config --init ...');
       spawnSync(process.execPath, [path.join(PROJECT_ROOT, 'src', 'cli.js'), 'config', '--init'], { stdio: 'inherit' });
-      console.log('✔ 已生成配置，请编辑 `./.a-share-assistant/config.json` 填写 noteRoot / cacheRoot / fuyao.apiKey。');
+      console.log('✔ 已生成配置，请编辑 `./.a-share-assistant/config.json`：');
+      console.log('   必填 fuyao.apiKey（https://fuyao.aicubes.cn 签发）');
+      console.log('   可选 iwencai.apiKey（https://www.iwencai.com/skillhub 获取，填了才有「公告/新闻」通道）');
     } else {
       console.log('→ 请稍后运行 `node src/cli.js config --init` 或 `config --template` 创建配置。');
     }
   } else {
     console.log('（非交互环境）运行 `node src/cli.js config --init`（生成）或 `--template`（模板）创建配置。');
   }
+}
+
+// ── 可选增强：问财「公告/新闻」通道（缺了不影响主链路）──────────────────────
+const SKILLS_DIR = path.join(os.homedir(), '.agents', 'skills');
+const IW_SKILLS = ['announcement-search', 'news-search'];
+const installedIw = IW_SKILLS.filter((s) => fs.existsSync(path.join(SKILLS_DIR, s)));
+if (installedIw.length < IW_SKILLS.length) {
+  console.log('');
+  console.log(`ℹ️ 可选增强（公告/新闻通道）：已装 ${installedIw.length}/${IW_SKILLS.length} 个问财技能`);
+  console.log('   1) Key：把 iwencai.apiKey 写进 `.a-share-assistant/config.json`（https://www.iwencai.com/skillhub 获取）');
+  console.log('   2) 技能：python <iwencai-skillhub-cli.py> --dir "%USERPROFILE%\\.agents\\skills" install announcement-search');
+  console.log('            （news-search 同理；装完新开会话即可用 `node src/cli.js search --channel announcement|news --q "..."`）');
+  console.log('   不装也完全可用：行情/财务/涨停龙虎榜/复盘/持仓分析走 fuyao，与这条通道无关。');
 }
 
 console.log('');

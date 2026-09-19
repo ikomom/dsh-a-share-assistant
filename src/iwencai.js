@@ -71,7 +71,9 @@ export async function search({ channel, query, size = 10, timeout = 60, includeR
   }
   const script = skillScript(meta.slug);
   if (!script) {
-    throw new Error(`未安装技能 ${meta.slug}。安装：python <iwencai-skillhub-cli.py> --dir "%USERPROFILE%\\.agents\\skills" install ${meta.slug}`);
+    throw new Error(`未安装技能 ${meta.slug}（技能目录 ~/.agents/skills）。安装：
+  python <iwencai-skillhub-cli.py> --dir "%USERPROFILE%\\.agents\\skills" install ${meta.slug}
+技能与 Key 的获取入口：https://www.iwencai.com/skillhub`);
   }
   const rawFile = path.join(CACHE_ROOT, `iwencai-${channel}-${Date.now()}.json`);
   fs.mkdirSync(path.dirname(rawFile), { recursive: true });

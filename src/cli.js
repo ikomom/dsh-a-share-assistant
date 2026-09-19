@@ -69,7 +69,15 @@ async function cmdCheck(opts = {}) {
   log(`试调: ${dl.probe.detail}`);
   // 问财渠道（公告/新闻）：Key + 技能脚本是否就位，属"链路就绪"的一部分，故放在 --quick 也会执行的位置
   const iwStatus = iwencai.channelStatus();
-  log(`消息面渠道(问财): ${iwStatus.map((x) => `${x.label}${x.keyOk ? (x.installed ? '✅' : '⚠技能未装') : '⚠缺Key'}`).join(' / ')}`);
+  const iwOk = iwStatus.every((x) => x.keyOk && x.installed);
+  log(`消息面渠道(问财): ${iwStatus.map((x) => `${x.label}${x.keyOk ? (x.installed ? '✅' : '⚠技能未装') : '⚠缺Key'}`).join(' / ')}${iwOk ? '' : '（可选通道）'}`);
+  if (!iwOk && !opts.quick) {
+    const missingKey = iwStatus.some((x) => !x.keyOk);
+    const missingSkill = iwStatus.some((x) => !x.installed);
+    if (missingKey) log('  开启方式① 填 Key：把 iwencai.apiKey 写进上面那个 config.json（https://www.iwencai.com/skillhub 获取）');
+    if (missingSkill) log('  开启方式② 装技能：python <iwencai-skillhub-cli.py> --dir "%USERPROFILE%\\.agents\\skills" install announcement-search（news-search 同理）');
+    log('  不开也不影响主链路：行情/财务/涨停龙虎榜/复盘/持仓分析照常；只是没有「公告/新闻」这两个通道');
+  }
   const ready = dl.keyOk && dl.endpointsCount > 0 && dl.probe.ok;
   log(ready ? '→ 数据链路就绪，可以取数' : '→ 数据链路未就绪：请先补 key / 端点映射后再取数，不要现场翻源码找接口');
   if (opts.quick) return; // --quick：只看链路就绪，跳过缓存索引与参数速查
@@ -743,8 +751,17 @@ async function promptYesNo(question) {
 
 function sampleConfig() {
   const sample = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'config.example.json'), 'utf8'));
-  if (sample.fuyao) sample.fuyao.apiKey = ''; // 双保险：不落敏感值
+  // 双保险：生成的配置里任何 Key 都留空（绝不把示例文件里的值带出去）
+  if (sample.fuyao) sample.fuyao.apiKey = '';
+  if (sample.iwencai) sample.iwencai.apiKey = '';
   return sample;
+}
+
+/** 配置生成后的填写引导：fuyao 必填 + 问财可选（缺了就没有公告/新闻通道） */
+function configFillHint() {
+  log('  必填 fuyao.apiKey      —— https://fuyao.aicubes.cn 官网签发（行情/财务/复盘主链路）');
+  log('  可选 iwencai.apiKey    —— https://www.iwencai.com/skillhub 获取；填好并装技能后才有「公告/新闻」通道');
+  log('  Key 只写在这个文件里：不要提交到仓库、不要贴进对话');
 }
 
 function writeConfigFile(target) {
@@ -766,13 +783,14 @@ async function cmdConfig(opts) {
   if (opts.init) {
     const p = writeConfigFile(USER_CONFIG_PATH);
     log(`✔ 已生成配置文件: ${p}`);
-    log('  请编辑填写 noteRoot / cacheRoot / fuyao.apiKey（官网 https://fuyao.aicubes.cn 签发）');
+    configFillHint();
     return;
   }
   if (opts.template) {
     const p = writeConfigFile(path.join(homeDir(), 'config.template.json'));
     log(`✔ 已生成模板: ${p}`);
-    log(`  请参照模板自行创建 ${USER_CONFIG_PATH} 并填写 noteRoot / cacheRoot / fuyao.apiKey`);
+    log(`  请参照模板自行创建 ${USER_CONFIG_PATH}`);
+    configFillHint();
     return;
   }
   // 交互模式：先问用户，得到同意才生成（非 TTY 环境不尝试交互，直接给指引）
@@ -789,10 +807,12 @@ async function cmdConfig(opts) {
   const ans = await promptYesNo('是否生成配置文件？（y=直接生成 / n=生成模板由你自行创建）: ');
   if (ans === true) {
     const p = writeConfigFile(USER_CONFIG_PATH);
-    log(`✔ 已生成: ${p}，请编辑填写 noteRoot / cacheRoot / fuyao.apiKey`);
+    log(`✔ 已生成: ${p}`);
+    configFillHint();
   } else if (ans === false) {
     const p = writeConfigFile(path.join(homeDir(), 'config.template.json'));
     log(`✔ 已生成模板: ${p}，请参照模板自行创建 ${USER_CONFIG_PATH}`);
+    configFillHint();
   } else {
     log('非交互环境：请运行 `node cli.js config --init`（直接生成）或 `config --template`（生成模板）。');
     process.exitCode = 1;
