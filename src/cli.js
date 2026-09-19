@@ -570,8 +570,10 @@ async function cmdPositionReview(o) {
     log(`✔ Markdown 已写入: ${o['md-file']}`);
   }
   // HTML 报告（默认生成单文件，--no-html 关闭）
+  // 默认落 {{cwd}}/复盘/持仓分析/ 子目录，与复盘笔记（{{cwd}}/复盘/YYYY-MM-DD.md）同处一层、按类型归档，
+  // 不把报告平铺在复盘根目录里；--out 可覆盖。
   if (!o['no-html']) {
-    const file = o.out || path.join(NOTES_ROOT || process.cwd(), '复盘', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
+    const file = o.out || path.join(process.cwd(), '复盘', '持仓分析', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, buildHoldingsHtml({ analysis: a, market, events, options: { generatedAt: a.generatedAt } }), 'utf8');
     const sec = [market ? `${market.sectors.gainers.length + market.sectors.losers.length} 个板块` : '', events.length ? `${events.length} 条风险日历` : '风险日历待补'].filter(Boolean).join(' + ');
