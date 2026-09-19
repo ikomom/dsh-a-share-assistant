@@ -68,16 +68,14 @@ async function cmdCheck(opts = {}) {
       : '端点映射: ❌ 为空（v0.2 待办，当前无法取真实数据）'
   );
   log(`试调: ${dl.probe.detail}`);
-  // 问财渠道（公告/新闻）：Key + 技能脚本是否就位，属"链路就绪"的一部分，故放在 --quick 也会执行的位置
-  const iwStatus = iwencai.channelStatus();
-  const iwOk = iwStatus.every((x) => x.keyOk && x.installed);
-  log(`消息面渠道(问财): ${iwStatus.map((x) => `${x.label}${x.keyOk ? (x.installed ? '✅' : '⚠技能未装') : '⚠缺Key'}`).join(' / ')}${iwOk ? '' : '（可选通道）'}`);
+  // 问财渠道（公告/新闻/研报/选股/事件/股东…）：Key + 技能脚本是否就位，属"链路就绪"的一部分
+  const iw = iwencai.channelStatus();
+  const iwOk = iw.keyOk && iw.missing.length === 0;
+  log(`问财渠道(可选): ${iw.installed}/${iw.total} 个技能已装${iw.keyOk ? '，Key ✅' : '，⚠缺Key'}${iwOk ? ' ✅' : ''}`);
   if (!iwOk && !opts.quick) {
-    const missingKey = iwStatus.some((x) => !x.keyOk);
-    const missingSkill = iwStatus.some((x) => !x.installed);
-    if (missingKey) log('  开启方式① 填 Key：把 iwencai.apiKey 写进上面那个 config.json（https://www.iwencai.com/skillhub 获取）');
-    if (missingSkill) log('  开启方式② 装技能：python <iwencai-skillhub-cli.py> --dir "%USERPROFILE%\\.agents\\skills" install announcement-search（news-search 同理）');
-    log('  不开也不影响主链路：行情/财务/涨停龙虎榜/复盘/持仓分析照常；只是没有「公告/新闻」这两个通道');
+    if (!iw.keyOk) log('  开启方式① 填 Key：把 iwencai.apiKey 写进上面那个 config.json（https://www.iwencai.com/skillhub 获取）');
+    if (iw.missing.length) log(`  开启方式② 装技能：node scripts/install-iwencai-skills.mjs --skills ${iw.missing.slice(0, 3).map((m) => m.slug).join(',')}${iw.missing.length > 3 ? ',…' : ''}`);
+    log(`  不开也不影响主链路：行情/财务/涨停龙虎榜/复盘/持仓分析照常；只是没有问财那 ${iw.total} 个通道（${iw.rows.slice(0, 6).map((r) => r.label).join('/')}…）`);
   }
   const ready = dl.keyOk && dl.endpointsCount > 0 && dl.probe.ok;
   log(ready ? '→ 数据链路就绪，可以取数' : '→ 数据链路未就绪：请先补 key / 端点映射后再取数，不要现场翻源码找接口');
@@ -318,7 +316,14 @@ async function cmdSearch(o) {
   if (o.raw && r.raw) { console.log(r.raw); return; }
   if (o.summary) {
     log(`${r.label}检索「${r.query}」：共 ${r.total} 条（返回 ${r.items.length}）`);
-    for (const it of r.items) log(`  ${it.date} | ${it.title} | ${it.source}${it.url ? ' | ' + it.url : ''}`);
+    if (r.columns && r.columns.length) {
+      // B 形态（选股/行情/财务/事件/股东/宏观…）：中文列表格，逐行紧凑打印
+      const cols = r.columns.slice(0, 8);
+      log(`  列: ${cols.join(' | ')}${r.columns.length > cols.length ? ` …（共 ${r.columns.length} 列）` : ''}`);
+      for (const it of r.items) log(`  - ${cols.map((c) => `${c}=${it[c] ?? ''}`).join(' | ')}`);
+    } else {
+      for (const it of r.items) log(`  ${it.date} | ${it.title} | ${it.source}${it.url ? ' | ' + it.url : ''}`);
+    }
     return;
   }
   const { raw, ...out } = r;
@@ -863,10 +868,13 @@ function cmdHelp() {
   investigate    --code X [--report YYYY-N]
                             一键个股体检（拉齐行情/三表/估值/异动并落盘）
   daily-snapshot [--date D]  一键每日复盘快照（涨停/跌停/炸板/连板/龙虎榜/热榜/板块/指数落盘）
-  search         --channel announcement|news --q "标的/主题 自然语言" [--size N]
-                 [--summary | --raw | --save T]
-                             消息面检索（问财渠道）：① 公告全文+原文PDF ② 财经新闻/研报摘要
-                             --raw 输出网关原始 JSON；--save 落缓存；Key 读 config 的 iwencai.apiKey
+  search         --channel <通道> --q "自然语言问句" [--size N] [--summary | --raw | --save T]
+                             问财渠道（17 个）：announcement 公告 / news 新闻 / report 研报 /
+                             astock 选股 / market 行情 / finance 财务 / event 事件(排雷) /
+                             holder 股东 / research 机构评级 / macro 宏观 / index 指数 /
+                             sector 板块筛选 / industry 行业 / profile 基本资料 / business 经营 /
+                             etf ETF筛选 / cb 可转债；也可直接传技能 slug
+                             默认输出纯 JSON；--summary 人读摘要；--raw 网关原始 JSON；--save 落缓存
 
 data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）

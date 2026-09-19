@@ -80,7 +80,12 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | **公告** | 问财渠道 `search --channel announcement`（iwencai 技能 announcement-search） | announcement | 沪深北公告全文检索 + 原文/PDF 链接；**fuyao 无此能力** |
 | **新闻/资讯** | 问财渠道 `search --channel news`（iwencai 技能 news-search） | news | 官媒/财经媒体/行业站 + 券商研报摘要；题材催化剂的直接来源 |
 | **全市场涨跌家数（广度）** | `daily-snapshot` 落 `breadth`（一次全市场快照 + 本地聚合） | breadth | 5575 只的涨/跌/平家数，复盘"普涨普跌"的硬口径；明细 1.2MB **不进上下文** |
-| 股东/质押 | fuyao **无**；问财渠道有 `hithink-management-query`（**未接入**，需要时按消息面章节的命令装） | — | 现在如实说"fuyao 没有"，别编 |
+| **问财选股** | 问财渠道 `search --channel astock` | — | 自然语言多条件筛选（行情+财务+技术形态+概念）；fuyao 没有筛选能力 |
+| **事件/排雷** | 问财渠道 `search --channel event` | — | 业绩预告/增发/质押/解禁/调研/监管函——**排雷主力** |
+| **股东股本** | 问财渠道 `search --channel holder` | — | 股东户数、前十大股东、实控人、质押（fuyao 无） |
+| **机构观点/研报** | 问财渠道 `search --channel research|report` | — | 评级/目标价/业绩预测/券商金股 + 研报标题 |
+| **宏观/行业/板块筛选/指数** | 问财渠道 `search --channel macro|industry|sector|index` | — | 宏观指标、行业估值排名、板块筛选（fuyao 板块只有目录+行情） |
+| **基本资料/经营/ETF/可转债** | 问财渠道 `search --channel profile|business|etf|cb` | — | 上市日期/股本/费率、主营构成/客户/供应商、ETF 与可转债筛选 |
 | 主力资金/高频动向 | **外部不可用**（官方仅对同花顺AI客户端开放，实测 `code=2004`） | — | 别再试调；如实告知"该数据源当前拿不到" |
 | 期货/期权/QDII/基金经理 | **未接入** | — | 本项目只做 A股 + ETF/场外基金；用户问起如实说明 |
 
@@ -106,6 +111,7 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | （`daily-snapshot` 自动产生的第 9 项） | breadth | 全市场涨跌家数（脚本落盘，不占上下文） |
 | `search --channel announcement` | announcement | 公告（问财） |
 | `search --channel news` | news | 新闻/资讯（问财） |
+| `search --channel report|astock|event|holder|research|macro|index|sector|industry|profile|business|etf|cb` | 与通道同名的 type（如 `event`） | 问财其余通道（表格形态） |
 | fund-market-snapshot | quote | ETF 实时行情 |
 | fund-market-historical | kline | ETF 前复权日线 |
 | fund-profile / fund-returns / fund-nav / fund-drawdowns / fund-diagnostics | profile / returns / nav / drawdowns / diagnostics | 基金画像（各存各的，勿互相覆盖） |
@@ -179,19 +185,35 @@ node __PROJECT_ROOT__/src/cli.js position reset --yes                # 清空台
 **交易心理备注**：给每笔交易做心理复盘——`add/sell` 时用 `--psych "计划内/冲动追高"`；对已有交易 `position psych --code X --text "复盘：这笔是FOMO追高" [--date D]`。复盘"操作回顾/交易心理"板块引用这些备注，帮用户对账"当时为什么这么操作"。
 **复盘接入**：复盘"操作回顾"板块从 `position today` 当日流水自动引用（含建仓/卖出与已实现盈亏），用户再补充盈亏感受即可。
 
-## 消息面检索（问财渠道 `search`）
+## 问财渠道（`search`，17 个通道）
 
-行情/财务/涨停龙虎榜走 fuyao；**公告、新闻、研报资讯走问财渠道**——这是 fuyao 完全没有的一块，也是"消息面"的主要来源。
+fuyao 负责**行情/财务/涨停龙虎榜/板块/ETF**；问财渠道补 fuyao 完全没有的**消息面 + 筛选/事件类**：公告、新闻、研报、**问财选股**、事件（业绩预告/质押/解禁）、股东股本、机构评级、宏观、行业、板块筛选、可转债筛选等。
 
 ```bash
-node __PROJECT_ROOT__/src/cli.js search --channel announcement --q "贵州茅台 分红公告" --size 5
-node __PROJECT_ROOT__/src/cli.js search --channel news --q "人工智能 政策 最新" --size 5 --summary
-node __PROJECT_ROOT__/src/cli.js search --channel announcement --q "业绩预告" --save announcement
+node __PROJECT_ROOT__/src/cli.js search --channel announcement --q "贵州茅台 分红公告" --size 5       # 公告（带原文 PDF）
+node __PROJECT_ROOT__/src/cli.js search --channel event       --q "宁德时代 解禁 质押" --size 5       # 排雷：事件
+node __PROJECT_ROOT__/src/cli.js search --channel astock      --q "ROE大于15% 市盈率小于30 主力净流入" --size 10  # 问财选股
+node __PROJECT_ROOT__/src/cli.js search --channel holder      --q "贵州茅台 股东户数 前十大股东" --size 3
+node __PROJECT_ROOT__/src/cli.js search --channel research    --q "宁德时代 目标价 评级" --size 5
+node __PROJECT_ROOT__/src/cli.js search --channel news        --q "固态电池 政策 最新" --size 5 --summary
+node __PROJECT_ROOT__/src/cli.js search --channel report      --q "人形机器人 产业链 深度" --size 5
 ```
 
-- **两个通道**：`announcement`（沪深北公告全文 + 上交所/深交所原文 PDF 链接）、`news`（官媒/财经媒体/行业站 + 券商研报摘要）。
-- **检索词写法**：`标的 + 事件类型`（如「宁德时代 减持公告」「半导体 政策」）；一次一个主题，不够再换词，**别把长句塞进去**。
-- **输出**：默认纯 JSON（`items[{date,title,source,url,code,summary}]`，summary 截断 400 字）；`--summary` 人读摘要；`--raw` 网关原始 JSON（排查用）；`--save announcement|news` 落缓存。
+| 别名 | 用途 | 别名 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `announcement` | 公告全文 + 原文PDF链接 | `macro` | 宏观（GDP/CPI/PPI/社融/M2/PMI） |
+| `news` | 新闻/资讯（官媒·财经媒体·行业站） | `index` | 指数行情（上证/沪深300/创业板/恒生/纳指） |
+| `report` | 券商研报（标题·评级·目标价） | `sector` | 板块筛选（估值/资金流/涨跌幅/板块类型） |
+| `astock` | **问财选A股**（行情+财务+技术形态+概念多条件） | `industry` | 行业（估值/财务/盈利/排名） |
+| `market` | 行情（价格/涨跌幅/成交量/资金流/技术指标） | `profile` | 基本资料（上市日期/股本/费率） |
+| `finance` | 财务（营收/净利/ROE/负债率/现金流） | `business` | 经营（主营构成/客户/供应商/参控股） |
+| `event` | 事件（业绩预告/增发/质押/解禁/调研/监管函） | `etf` | ETF 筛选 |
+| `holder` | 股东股本（户数/十大股东/实控人/质押） | `cb` | 可转债筛选 |
+| `research` | 机构观点（评级/业绩预测/ESG/券商金股） | — | — |
+
+- **检索词就是"能问出来的问句"**：`标的/主题 + 指标或事件`（如「ROE大于15% 市盈率小于30」「贵州茅台 解禁」「ETF 规模排名」）。问财对**筛选条件**敏感、对"最大/最好"这类模糊词不敏感——「规模最大的沪深300ETF」返回 0 条，改成「沪深300ETF 有哪些」就有；问不出来就换个说法，别硬凑。
+- **输出两种形态**：`announcement|news|report` 返回 `items[{date,title,source,url,summary}]`；其余（`astock|market|finance|event|holder|research|macro|index|sector|industry|profile|business|etf|cb`）返回**中文列表格** `columns[] + items[]（行对象）`。默认纯 JSON；`--summary` 人读摘要；`--raw` 网关原始 JSON；`--save <type>` 落缓存。
+- **直接传技能 slug 也行**：`--channel hithink-astock-selector`（以后新装技能无需改代码）。
 - **Key 与安装**：Key 存在 `.a-share-assistant/config.json` 的 `iwencai.apiKey`（git 忽略，**不要写进笔记/仓库**）；技能装在 `~/.agents/skills/`。
   - 技能缺失、或用户想加问财的其他技能（选股 `hithink-astock-selector` / 事件 `hithink-event-query` / 股东 `hithink-management-query` / 机构评级 `hithink-insresearch-query`）：**一条命令搞定**——`node __PROJECT_ROOT__/scripts/install-iwencai-skills.mjs [--skills <技能名>]`（内部自动找 Python、下官方 SkillHub CLI、装、校验；`--check` 只看状态）。
   - 用户没配 Key 时：如实说明"公告/新闻通道没开"，并给出去 https://www.iwencai.com/skillhub 获取的方式；**不要用记忆或 web 搜索冒充公告原文**。

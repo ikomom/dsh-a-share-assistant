@@ -50,7 +50,9 @@
 
 **我的判断：** 今天有没有影响我持仓的消息？该调整还是按原计划？
 
-> 数据来源：`node src/cli.js search --channel announcement --q "标的 公告"`（公告全文+原文PDF）、`--channel news --q "主题 最新"`（新闻/研报摘要）。未配置该通道则记"未启用"，**不要凭印象填**。
+> 数据来源（问财渠道，未配置就记"未启用"，**不要凭印象填**）：
+> 公告 `search --channel announcement --q "标的 公告"`（带原文PDF）｜新闻 `--channel news --q "主题 最新"`｜研报 `--channel report --q "主题 深度"`
+> **排雷五项用 `--channel event --q "标的 业绩预告/减持/质押/解禁/监管函"` 逐项查**，查到就写清标的与性质。
 
 ---
 
