@@ -21,6 +21,7 @@
   },
   "scripts": {
     "install:preset": "node scripts/install-preset.js",
+    "install:iwencai": "node scripts/install-iwencai-skills.mjs",
     "cache": "node src/cli.js cache",
     "check": "node src/cli.js check"
   },

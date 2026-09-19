@@ -48,13 +48,27 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 {
   "noteRoot": "你的笔记库目录，如 D:/docs/private-doc 或 ~/notes",
   "cacheRoot": "缓存目录，默认 .a-share-assistant/cache，可留空",
-  "fuyao": { "apiKey": "你的 fuyao API Key（必填）" }
+  "fuyao": { "apiKey": "你的 fuyao API Key（必填，行情/财务/复盘主链路）" },
+  "iwencai": { "apiKey": "可选：问财 Key（公告/新闻通道，见下）" }
 }
 ```
 
+### 可选增强：公告 / 新闻通道（问财）
+
+fuyao 没有公告与新闻，这两块走同花顺问财渠道。**不装也完全不影响**行情/财务/涨停龙虎榜/复盘/持仓分析，装了才多出 `search` 命令：
+
+```bash
+node scripts/install-iwencai-skills.mjs           # 一条命令：查 Python → 下官方 SkillHub CLI → 装两个技能 → 校验
+node scripts/install-iwencai-skills.mjs --check   # 只看状态，不下载不安装
+node src/cli.js search --channel announcement --q "贵州茅台 分红公告" --size 5 --summary
+```
+
+需要：本机 Python 3（脚本会检测并给出安装提示）+ 问财 Key（填进 `config.json` 的 `iwencai.apiKey`，在 https://www.iwencai.com/skillhub 获取）。
+脚本只从同花顺官方 CDN 取 CLI，技能由该 CLI 从 `ms.10jqka.com.cn` 拉取，**不碰任何 Key**；Key 由你或 AI 写进 git 忽略的本地配置。
+
 ### 方式二：一句话请 AI 装
 
-把 [`AI_INSTALL.md`](./AI_INSTALL.md) 里的指令块整段发给任意 DSH 会话的 AI，AI 会自动完成克隆 → 装预设 → 引导配置 → 自检 → 收尾；需你决策的用 `ask_user` 询问，key 不经过对话。
+把 [`AI_INSTALL.md`](./AI_INSTALL.md) 里的指令块整段发给任意 DSH 会话的 AI，AI 会自动完成克隆 → 装预设 → 引导配置 → 自检 → **（可选）问你要不要开公告/新闻通道并替你装好** → 收尾；需你决策的用 `ask_user` 询问，key 不经过对话。
 
 ### 安装后
 

@@ -177,7 +177,9 @@ node __PROJECT_ROOT__/src/cli.js search --channel announcement --q "业绩预告
 - **两个通道**：`announcement`（沪深北公告全文 + 上交所/深交所原文 PDF 链接）、`news`（官媒/财经媒体/行业站 + 券商研报摘要）。
 - **检索词写法**：`标的 + 事件类型`（如「宁德时代 减持公告」「半导体 政策」）；一次一个主题，不够再换词，**别把长句塞进去**。
 - **输出**：默认纯 JSON（`items[{date,title,source,url,code,summary}]`，summary 截断 400 字）；`--summary` 人读摘要；`--raw` 网关原始 JSON（排查用）；`--save announcement|news` 落缓存。
-- **Key 与安装**：Key 存在 `.a-share-assistant/config.json` 的 `iwencai.apiKey`（git 忽略，**不要写进笔记/仓库**）；技能装在 `~/.agents/skills/{announcement-search,news-search}`，缺失时按报错里的命令用 iwencai SkillHub CLI 安装。
+- **Key 与安装**：Key 存在 `.a-share-assistant/config.json` 的 `iwencai.apiKey`（git 忽略，**不要写进笔记/仓库**）；技能装在 `~/.agents/skills/`。
+  - 技能缺失、或用户想加问财的其他技能（选股 `hithink-astock-selector` / 事件 `hithink-event-query` / 股东 `hithink-management-query` / 机构评级 `hithink-insresearch-query`）：**一条命令搞定**——`node __PROJECT_ROOT__/scripts/install-iwencai-skills.mjs [--skills <技能名>]`（内部自动找 Python、下官方 SkillHub CLI、装、校验；`--check` 只看状态）。
+  - 用户没配 Key 时：如实说明"公告/新闻通道没开"，并给出去 https://www.iwencai.com/skillhub 获取的方式；**不要用记忆或 web 搜索冒充公告原文**。
 - **合规口径**：引用时注明 `数据来源：同花顺问财`，并给原文链接与日期；检索不到就如实说没找到，**不要用记忆替代**。
 
 ## 持仓分析 / 复盘页（position review）
