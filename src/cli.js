@@ -9,7 +9,7 @@ import { ping, dataLinkProbe, getData, ENDPOINTS, ERROR_CODE_HINTS, toMsTimestam
 import * as cache from './cache.js';
 import * as position from './position.js';
 import { buildHoldingsHtml } from './report-html.js';
-import { fetchMarketContext } from './market.js';
+import { fetchMarketContext, fetchMarketBreadth, resolveTradingDay } from './market.js';
 import * as iwencai from './iwencai.js';
 import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
@@ -389,14 +389,19 @@ async function cmdInvestigate(opts) {
 
 // ── 一键每日复盘快照：node cli.js daily-snapshot [--date D] ──
 async function cmdDailySnapshot(opts) {
-  const date = opts.date || new Date().toISOString().slice(0, 10);
+  const date = opts.date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   const idx = '000001.SH,399001.SZ,399006.SZ';
+  // 按「最近交易日」取池：涨停/跌停/炸板池省略 date_ms 时按自然日取，周末与节假日会返回空池
+  let td = null;
+  try { td = await resolveTradingDay(date); } catch { /* 交易日历失败就退回默认取法 */ }
+  if (td && td.isTradingDay === false) log(`提示: ${date} 不是交易日 → 涨跌停/龙虎榜按最近交易日 ${td.date} 取`);
+  const poolParams = td ? { date_ms: String(td.ms) } : {};
   const jobs = [
-    ['limit-up', 'limit-up-pool', {}],
-    ['limit-down', 'limit-down-pool', {}],
-    ['limit-break', 'limit-break-pool', {}],
+    ['limit-up', 'limit-up-pool', poolParams],
+    ['limit-down', 'limit-down-pool', poolParams],
+    ['limit-break', 'limit-break-pool', poolParams],
     ['ladder', 'limit-up-ladder', {}],
-    ['dragon-tiger', 'dragon-tiger-list', {}],
+    ['dragon-tiger', 'dragon-tiger-list', td ? { date: td.date, board_type: 'all' } : {}],
     ['hot-stock', 'hot-stock-list', { period: 'day' }],
     ['sectors', 'ths-index-list', { tag: 'cn_concept' }],
     ['index', 'index-price-snapshot', { thscodes: idx }],
@@ -413,8 +418,17 @@ async function cmdDailySnapshot(opts) {
     }
   }));
   for (const x of results) log(x.ok ? `  ✔ ${x.type.padEnd(12)} ${x.file}` : `  ✗ ${x.type.padEnd(12)} ${x.err}`);
-  log(`  完成: ${results.filter((x) => x.ok).map((x) => x.type).join('、')}`);
-  log(`  复盘时用 cache latest --type <limit-up|dragon-tiger|sectors|hot-stock|index|...> 读取`);
+  // 全市场涨跌家数（广度）：一次全市场快照 + 本地聚合，只落统计值（明细 1.2MB 不进上下文）
+  try {
+    const mb0 = await fetchMarketBreadth();
+    const mb = { ...mb0, snapshotDate: mb0.date, date: td ? td.date : mb0.date };
+    const f = cache.saveSnapshot({ type: 'breadth', date, data: mb });
+    log(`  ✔ ${'breadth'.padEnd(12)} ${path.basename(f)}  涨${mb.up}/跌${mb.down}/平${mb.flat}（共 ${mb.total} 只，数据日期 ${mb.date}）`);
+  } catch (e) {
+    log(`  ✗ ${'breadth'.padEnd(12)} ${e.message}`);
+  }
+  log(`  完成: ${results.filter((x) => x.ok).map((x) => x.type).join('、')}、breadth`);
+  log(`  复盘时用 cache latest --type <limit-up|dragon-tiger|sectors|hot-stock|index|breadth|...> 读取`);
 }
 
 // ── 持仓股分析：node cli.js position review [--date D] [--html|--no-html] [--out 路径] [--no-md] ──
@@ -507,7 +521,9 @@ async function cmdPositionReview(o) {
   if (market) {
     const idx = market.indices.map((x) => `${x.name} ${x.changePct === null ? '—' : pctOr(x.changePct)}`).join(' ｜ ');
     log(`大盘: ${idx}`);
-    if (market.breadth) log(`情绪: 涨停 ${market.breadth.limitUp} ｜ 跌停 ${market.breadth.limitDown} ｜ 炸板 ${market.breadth.limitBreak} ｜ 封板率 ${market.breadth.sealRate === null ? '—' : market.breadth.sealRate + '%'}${market.ladder?.maxBoard ? ` ｜ 最高 ${market.ladder.maxBoard} 板` : ''}${market.sectors.flatLine ? ` ｜ 概念涨 ${market.sectors.flatLine.up}/跌 ${market.sectors.flatLine.down}` : ''}`);
+    if (market.breadth) log(`情绪: 涨停 ${market.breadth.limitUp} ｜ 跌停 ${market.breadth.limitDown} ｜ 炸板 ${market.breadth.limitBreak} ｜ 封板率 ${market.breadth.sealRate === null ? '—' : market.breadth.sealRate + '%'}${market.ladder?.maxBoard ? ` ｜ 最高 ${market.ladder.maxBoard} 板` : ''}`);
+    if (market.marketBreadth) log(`广度: 全市场 ${market.marketBreadth.total} 只 ｜ 涨 ${market.marketBreadth.up} / 跌 ${market.marketBreadth.down} / 平 ${market.marketBreadth.flat}（数据日期 ${market.marketBreadth.date}）`);
+    if (market.sectors.flatLine) log(`概念: 涨 ${market.sectors.flatLine.up} / 跌 ${market.sectors.flatLine.down}（共 ${market.sectors.total} 个）`);
     if (market.sectors.gainers.length) log(`领涨: ${market.sectors.gainers.slice(0, 5).map((x) => `${x.name} ${pctOr(x.changePct)}`).join(' ｜ ')}`);
     if (market.sectors.losers.length) log(`领跌: ${market.sectors.losers.slice(0, 5).map((x) => `${x.name} ${pctOr(x.changePct)}`).join(' ｜ ')}`);
     if (market.errors?.length) log(`⚠ 市场环境部分失败: ${market.errors.join('；')}`);

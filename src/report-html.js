@@ -112,6 +112,7 @@ export function buildHoldingsHtml(p) {
 
   const breadth = market?.breadth;
   const ladder = market?.ladder;
+  const mb = market?.marketBreadth;
   const sentiment = breadth
     ? `<div class="sent">
         <span class="pill buy">涨停 ${breadth.limitUp}</span>
@@ -119,6 +120,7 @@ export function buildHoldingsHtml(p) {
         <span class="pill info">炸板 ${breadth.limitBreak}</span>
         <span class="pill hold">封板率 ${breadth.sealRate === null ? '—' : breadth.sealRate + '%'}</span>
         ${ladder && ladder.maxBoard ? `<span class="pill info">最高 ${ladder.maxBoard} 板${ladder.maxBoardNames.length ? '（' + esc(ladder.maxBoardNames.join('、')) + '）' : ''}</span>` : ''}
+        ${mb ? `<span class="pill buy">全市场涨 ${mb.up}</span><span class="pill watch">跌 ${mb.down}</span><span class="pill info">平 ${mb.flat}（共 ${mb.total} 只）</span>` : ''}
         ${market?.sectors?.flatLine ? `<span class="pill info">概念涨 ${market.sectors.flatLine.up} / 跌 ${market.sectors.flatLine.down}</span>` : ''}
       </div>`
     : '<div class="empty">涨跌停情绪未取到</div>';
@@ -167,6 +169,8 @@ export function buildHoldingsHtml(p) {
   const h = (n) => Math.max(170, n * 54 + 70); // 图表高度随持仓数自适应，避免大片留白
   const marketErrors = (p.options?.marketErrors ?? market?.errors ?? []);
 
+  const dataDay = market?.tradeDate || d;
+  const dayNote = dataDay !== d ? `（${d} 非交易日，行情取最近交易日 ${dataDay} 收盘）` : '';
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -232,7 +236,7 @@ ${echartsTag()}
 
 <h1>持仓股分析 · ${esc(d)}</h1>
 <div class="sub">今日大盘与板块环境 → 台账持仓的计划对照 → 触发状态与操作取向</div>
-<div class="meta">行情截至 ${esc(d)} ｜ 账户 ${esc(a.account || '默认')} ｜ 数据来源 同花顺金融数据API（fuyao.aicubes.cn） ｜ 持仓行情口径 ${a.rows.some((r) => r.dataSource === '实时快照') ? '实时快照' : '最近交易日日线'}${market?.indexDate ? ` ｜ 指数 ${esc(market.indexDate)}` : ''}${market?.breadth?.date ? ` ｜ 涨跌停 ${esc(market.breadth.date)}` : ''} ｜ 生成时间 ${esc(p.options?.generatedAt || a.generatedAt || '')}</div>
+<div class="meta">行情截至 ${esc(dataDay)}${dayNote} ｜ 账户 ${esc(a.account || '默认')} ｜ 数据来源 同花顺金融数据API（fuyao.aicubes.cn） ｜ 持仓行情口径 ${a.rows.some((r) => r.dataSource === '实时快照') ? '实时快照' : '最近交易日日线'}${market?.indexDate ? ` ｜ 指数 ${esc(market.indexDate)}` : ''}${market?.breadth?.date ? ` ｜ 涨跌停 ${esc(market.breadth.date)}` : ''} ｜ 生成时间 ${esc(p.options?.generatedAt || a.generatedAt || '')}</div>
 
 <div class="card tldr">
   <h3>⚡ 一句话结论</h3>

@@ -1,6 +1,6 @@
-// 市场环境（复盘页用）：指数涨跌 + 概念板块涨跌排名 + 涨跌停情绪。
+// 市场环境（复盘页用）：指数涨跌 + 概念板块涨跌排名 + 涨跌停情绪 + 全市场涨跌家数。
 // 全部走 fuyao REST（GET + X-api-key）；板块排名用**一次批量** index-price-snapshot（390 个概念，分片 200）。
-import { getData } from './fuyao.js';
+import { getData, fetchAllMarketSnapshot } from './fuyao.js';
 
 const INDICES = [
   ['000001.SH', '上证指数'],
@@ -11,6 +11,45 @@ const INDICES = [
 const pct2 = (v) => (v === null || v === undefined || v === '' ? null : Math.round(Number(v) * 100) / 100);
 const shDate = (ms) => new Date(Number(ms)).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+
+/**
+ * 解析"最近交易日"（<= 目标日的最后一个交易日）。
+ * 必要性：涨停/跌停/炸板池省略 date_ms 时按**服务端当前自然日**取，周末与节假日会返回空池，
+ * 复盘时会得出"涨停 0 家"这种误导性结论。交易日历的 date 是 YYYYMMDD，date_ms 是当日零点 ms。
+ * @returns {Promise<{date:string, ms:number, isTradingDay:boolean}|null>}
+ */
+export async function resolveTradingDay(date) {
+  const day = date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  const res = await getData('trading-days', {});
+  const items = res?.data?.item ?? [];
+  const days = items
+    .map((x) => ({ ms: Number(x.date_ms), date: shDate(x.date_ms) }))
+    .filter((x) => Number.isFinite(x.ms))
+    .sort((a, b) => a.ms - b.ms);
+  const upto = days.filter((x) => x.date <= day);
+  const pick = upto[upto.length - 1] ?? days[days.length - 1] ?? null;
+  return pick ? { date: pick.date, ms: pick.ms, isTradingDay: pick.date === day } : null;
+}
+
+/**
+ * 全市场涨跌家数（广度）：一次全市场快照（~5500 只、1.2MB）+ 本地聚合，**只返回统计值**。
+ * 复盘里"普涨/普跌"就看这个，比板块口径更接近体感。
+ */
+export async function fetchMarketBreadth() {
+  const snap = await fetchAllMarketSnapshot();
+  const items = snap?.data?.item ?? [];
+  if (!items.length) throw new Error('全市场快照为空（接口未返回 item）');
+  let up = 0, down = 0;
+  for (const x of items) {
+    const c = Number(x.price_change);
+    if (c > 0) up++;
+    else if (c < 0) down++;
+  }
+  return {
+    total: items.length, up, down, flat: items.length - up - down,
+    date: snap?.data?.timestamp ? shDate(snap.data.timestamp) : null,
+  };
+}
 
 /** 按代码批量取指数/板块行情（分片避免 URL 过长） */
 async function indexQuotes(codes, chunk = 200) {
@@ -30,16 +69,27 @@ async function indexQuotes(codes, chunk = 200) {
 export async function fetchMarketContext({ date, sectorTop = 8 } = {}) {
   const day = date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   const ctx = {
-    date: day, indices: [], indexDate: null,
+    date: day, tradeDate: day, isTradingDay: null, indices: [], indexDate: null,
     sectors: { gainers: [], losers: [], total: 0, catalog: 0, date: null },
-    breadth: null, errors: [],
+    breadth: null, marketBreadth: null, errors: [],
   };
 
-  // ① 指数 + ③ 涨跌停情绪 + ④ 连板：并行
-  const [idxRes, poolRes, ladderRes] = await Promise.allSettled([
+  // 先定"最近交易日"：涨停池等接口省略 date_ms 时按自然日取，周末会空
+  let td = null;
+  try {
+    td = await resolveTradingDay(day);
+    if (td) { ctx.tradeDate = td.date; ctx.isTradingDay = td.isTradingDay; }
+  } catch (e) {
+    ctx.errors.push(`交易日历: ${e.message}`);
+  }
+  const poolParams = td ? { date_ms: String(td.ms) } : {};
+
+  // ① 指数 + ③ 涨跌停情绪 + ④ 连板 + ⑤ 全市场广度：并行
+  const [idxRes, poolRes, ladderRes, mbRes] = await Promise.allSettled([
     getData('index-price-snapshot', { thscodes: INDICES.map((x) => x[0]).join(',') }),
-    Promise.all([getData('limit-up-pool', {}), getData('limit-down-pool', {}), getData('limit-break-pool', {})]),
+    Promise.all([getData('limit-up-pool', poolParams), getData('limit-down-pool', poolParams), getData('limit-break-pool', poolParams)]),
     getData('limit-up-ladder', {}),
+    fetchMarketBreadth(),
   ]);
 
   if (idxRes.status === 'fulfilled') {
@@ -64,10 +114,19 @@ export async function fetchMarketContext({ date, sectorTop = 8 } = {}) {
     ctx.breadth = {
       limitUp, limitDown: n(dn), limitBreak,
       sealRate: denom ? Math.round((limitUp / denom) * 1000) / 10 : null,
-      date: up.timestamp ? shDate(up.timestamp) : null,
+      date: td?.date ?? (up.timestamp ? shDate(up.timestamp) : null),
+      note: ctx.isTradingDay === false ? `非交易日：涨停池取最近交易日 ${td?.date ?? '—'} 的数据` : null,
     };
   } else {
     ctx.errors.push(`涨跌停情绪: ${poolRes.reason?.message || poolRes.reason}`);
+  }
+
+  if (mbRes.status === 'fulfilled') {
+    const mb = mbRes.value;
+    // 标签用交易日（快照 timestamp 在周末仍显示当天，会让"涨跌家数"看起来是周末数据）
+    ctx.marketBreadth = { ...mb, snapshotDate: mb.date, date: td ? td.date : mb.date };
+  } else {
+    ctx.errors.push(`全市场涨跌家数: ${mbRes.reason?.message || mbRes.reason}`);
   }
 
   if (ladderRes.status === 'fulfilled') {

@@ -47,6 +47,16 @@ export function authHeaders() {
   return { 'X-api-key': key };
 }
 
+/**
+ * 全市场行情快照（约 5500 只、1.2 MB）：**只在需要「全市场涨跌家数」这类聚合统计时调用**。
+ * 刻意绕过 getData 的 thscodes 必填预检——那道护栏是防止误把全市场明细灌进上下文的；
+ * 调用方**必须只取聚合结果**，不得把 item 整体打印或塞进上下文（实测 308ms / 5575 只）。
+ */
+export async function fetchAllMarketSnapshot() {
+  const url = `${FUYAO_BASE}${ENDPOINTS['price-snapshot'].path}`;
+  return fetchJson(url, { method: 'GET', headers: authHeaders() });
+}
+
 /** 数据链路体检：key 是否就绪 + 端点表是否已配置 + 最小接口试调 */
 export async function dataLinkProbe() {
   const key = getApiKey();
