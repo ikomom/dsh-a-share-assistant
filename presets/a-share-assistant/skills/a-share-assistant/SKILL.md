@@ -77,6 +77,7 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | **ETF/基金 持仓** | fund-holdings / fund-asset-allocation / fund-holders-top / fund-dividends | stock:<code>:holdings | 重仓股+行业集中度、股债配置、前十大持有人（含多期披露，按 report_date_ms 取最新）、分红记录 |
 | **基金诊断** | fund-diagnostics | stock:<code>:diagnostics | 维度评分/同类对比/韧性 |
 | **全市场导出** | market-dump-url（dump=daily-k/daily-k-10d/adjustment-factors） | — | Parquet 预签名链接（**5 分钟失效，禁止缓存/持久化**） |
+| **日内分时（分钟线）** | 问财渠道 `search --channel market --series`（问句带范围+颗粒度） | minute-<code> 等 | fuyao 高频端点被锁（code=2004）、K线只支持 1d；分时只能走问财 |
 | **公告** | 问财渠道 `search --channel announcement`（iwencai 技能 announcement-search） | announcement | 沪深北公告全文检索 + 原文/PDF 链接；**fuyao 无此能力** |
 | **新闻/资讯** | 问财渠道 `search --channel news`（iwencai 技能 news-search） | news | 官媒/财经媒体/行业站 + 券商研报摘要；题材催化剂的直接来源 |
 | **全市场涨跌家数（广度）** | `daily-snapshot` 落 `breadth`（一次全市场快照 + 本地聚合） | breadth | 5575 只的涨/跌/平家数，复盘"普涨普跌"的硬口径；明细 1.2MB **不进上下文** |
@@ -214,6 +215,25 @@ node __PROJECT_ROOT__/src/cli.js search --channel report      --q "人形机器�
 - **检索词就是"能问出来的问句"**：`标的/主题 + 指标或事件`（如「ROE大于15% 市盈率小于30」「贵州茅台 解禁」「ETF 规模排名」）。问财对**筛选条件**敏感、对"最大/最好"这类模糊词不敏感——「规模最大的沪深300ETF」返回 0 条，改成「沪深300ETF 有哪些」就有；问不出来就换个说法，别硬凑。
 - **输出两种形态**：`announcement|news|report` 返回 `items[{date,title,source,url,summary}]`；其余（`astock|market|finance|event|holder|research|macro|index|sector|industry|profile|business|etf|cb`）返回**中文列表格** `columns[] + items[]（行对象）`。默认纯 JSON；`--summary` 人读摘要；`--raw` 网关原始 JSON；`--save <type>` 落缓存。
 - **直接传技能 slug 也行**：`--channel hithink-astock-selector`（以后新装技能无需改代码）。
+
+### 分时（日内分钟线）—— 只能走问财
+
+fuyao 的**高频端点对外被锁**（`high-frequency/intraday|historical` 实测 `code=2004`，仅同花顺AI客户端），`price-historical` **只支持 1d**（传 `5m` 报 `code=1002`）。所以日内分时用问财 `--channel market --series`：
+
+```bash
+# 单日 1 分钟（收盘价 + 成交量）
+node __PROJECT_ROOT__/src/cli.js search --channel market --q "贵州茅台 今日9:30到15:00每分钟收盘价和成交量" --series --summary
+# 单日 5 分钟
+node __PROJECT_ROOT__/src/cli.js search --channel market --q "中天科技 今日9:30到15:00每5分钟收盘价" --series --summary
+# 多日：每日分时（含 09:15/09:25 集合竞价点）
+node __PROJECT_ROOT__/src/cli.js search --channel market --q "贵州茅台 近5个交易日 每日分时成交额" --series --save minute-600519
+```
+
+- **问句模板**：单日 `<标的> 今日9:30到15:00每<1|5|15|30|60>分钟<字段>`；多日 `<标的> 近N个交易日 每日分时<字段>`。
+  **不写时间范围/颗粒度就不会展开成序列**（实测只回 1 个最新值）；多日别写 `9:30到15:00每分钟`（实测不展开），用「每日分时」。
+- **为什么必须 `--series`**：问财的分时是"**每列一个时间点**"的宽表（1 分钟一天 ≈ 480 列、倒序），不加 `--series` 会把几百列灌进上下文；加了才转成按时间升序的 `series[{date,time,<字段>}]`。
+- **容量**：单次最多 2000 个时间点（超出保留末尾并置 `truncated`）；`--save <type>` 落盘后用 `cache latest --type <type>` 读。
+- **口径**：分时为**未复权**原始价，且含集合竞价点（09:15/09:25）；跨除权日的多日区间要自己对齐复权，或只用单日。
 - **Key 与安装**：Key 存在 `.a-share-assistant/config.json` 的 `iwencai.apiKey`（git 忽略，**不要写进笔记/仓库**）；技能装在 `~/.agents/skills/`。
   - 技能缺失、或用户想加问财的其他技能（选股 `hithink-astock-selector` / 事件 `hithink-event-query` / 股东 `hithink-management-query` / 机构评级 `hithink-insresearch-query`）：**一条命令搞定**——`node __PROJECT_ROOT__/scripts/install-iwencai-skills.mjs [--skills <技能名>]`（内部自动找 Python、下官方 SkillHub CLI、装、校验；`--check` 只看状态）。
   - 用户没配 Key 时：如实说明"公告/新闻通道没开"，并给出去 https://www.iwencai.com/skillhub 获取的方式；**不要用记忆或 web 搜索冒充公告原文**。

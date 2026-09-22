@@ -86,6 +86,38 @@ function interfaceOf(script) {
   }
 }
 
+/**
+ * 把问财的「动态列宽表」转成按时间升序的**分时序列**。
+ * 问财返回分时数据时不是行式，而是每列一个时间点：`收盘价[20260922 15:00:00]`、
+ * `5分钟线收盘价[…]`、`成交量[…]`，且**按时间倒序**排列。这里解析成一行一个时间点。
+ * @returns {{fields:string[], points:number, truncated:boolean, series:Array<object>}|null}
+ *   null = 该行没有动态列（说明这次结果不是分时类）
+ */
+export function pivotSeries(row, { maxPoints = 2000 } = {}) {
+  if (!row || typeof row !== 'object') return null;
+  const re = /^(.+?)\[(\d{8}) (\d{2}:\d{2}:\d{2})\]$/;
+  const points = new Map();
+  const fields = new Set();
+  for (const [k, v] of Object.entries(row)) {
+    const m = re.exec(k);
+    if (!m) continue;
+    const [, field, date, time] = m;
+    fields.add(field);
+    const key = `${date} ${time}`;
+    if (!points.has(key)) points.set(key, { values: {} });
+    points.get(key).values[field] = v;
+  }
+  if (!points.size) return null;
+  const list = [...points.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, p]) => {
+      const [date, time] = key.split(' ');
+      return { ts: key, date, time, ...p.values };
+    });
+  const truncated = list.length > maxPoints;
+  return { fields: [...fields], points: list.length, truncated, series: truncated ? list.slice(-maxPoints) : list };
+}
+
 /** 归一化：A 形态（公告/新闻/研报）取 data[]；B 形态（hithink-*）取 datas[] 表格 */
 function normalize(body, size, summaryLimit = 400) {
   if (!body || typeof body !== 'object') return { items: [], rowCount: 0, columns: [] };
@@ -119,7 +151,7 @@ function normalize(body, size, summaryLimit = 400) {
  * @param {{channel:string, query:string, size?:number, timeout?:number, includeRaw?:boolean}} opts
  *   channel 可用别名（见 CHANNELS）或技能 slug；query 用自然语言（问财支持问句）
  */
-export async function search({ channel, query, size = 10, timeout = 60, includeRaw = false } = {}) {
+export async function search({ channel, query, size = 10, timeout = 60, includeRaw = false, series: seriesWanted = false } = {}) {
   const ch = resolveChannel(channel);
   if (!ch) {
     throw new Error(`未知渠道 ${channel}。可用别名：${Object.keys(CHANNELS).join(' | ')}（也可直接传已安装的技能 slug）`);
@@ -183,11 +215,14 @@ export async function search({ channel, query, size = 10, timeout = 60, includeR
   try { body = JSON.parse(raw); } catch { /* 保留 raw 供排查 */ }
   const norm = normalize(body, size);
   if (!includeRaw) fs.rmSync(rawFile, { force: true });
+  // 分时：问财把分钟数据摊成"每列一个时间点"的宽表，这里转成正序序列（仅当调用方要 series）
+  const series = seriesWanted ? pivotSeries(norm.items[0]) : undefined;
   return {
     channel: ch.key, label: ch.label, skill: ch.slug, query: q, size,
     total: norm.rowCount ?? norm.items.length,
     columns: norm.columns ?? [],
     items: norm.items,
+    ...(series ? { series } : {}),
     ...(includeRaw ? { raw, rawFile } : {}),
   };
 }

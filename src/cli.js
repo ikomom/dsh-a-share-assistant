@@ -295,17 +295,43 @@ function printDataSummary(result) {
   }
 }
 
-// ── 消息面检索（问财渠道）：node cli.js search --channel announcement|news --q "..." ──
-// 公告 = 沪深北公告全文检索（带原文/PDF 链接）；news = 官媒/财经媒体/行业站 + 券商研报摘要
+// ── 问财渠道检索：node cli.js search --channel <通道> --q "自然语言问句" [--series] ──
+// --series：把分时类结果的「每列一个时间点」宽表转成按时间升序的序列（问句要显式带时间范围与颗粒度）
 async function cmdSearch(o) {
   const channel = o.channel || 'news';
-  if (!iwencai.CHANNELS[channel]) fail(`search 需要 --channel <${Object.keys(iwencai.CHANNELS).join('|')}>（当前: ${channel}）`);
-  if (!o.q) fail('search 需要 --q "<自然语言检索词>"，如 --q "贵州茅台 分红公告"');
+  const ch = iwencai.resolveChannel(channel);
+  if (!ch) fail(`search 需要 --channel <${Object.keys(iwencai.CHANNELS).join('|')}> 或已安装的技能 slug（当前: ${channel}）`);
+  if (!o.q) fail('search 需要 --q "<自然语言问句>"，如 --q "贵州茅台 分红公告"');
   let r;
   try {
-    r = await iwencai.search({ channel, query: o.q, size: o.size ? Number(o.size) : 10, includeRaw: !!o.raw });
+    r = await iwencai.search({ channel, query: o.q, size: o.size ? Number(o.size) : 10, includeRaw: !!o.raw, series: !!o.series });
   } catch (e) {
     fail(`检索失败: ${e.message}`);
+  }
+  // 分时序列模式：默认只出序列（原宽表 items 会有几百列，不进上下文）
+  if (o.series) {
+    if (!r.series) fail(`这次结果里没有分时序列。分时问句要显式给范围与颗粒度，例如：--q "贵州茅台 今日9:30到15:00每分钟收盘价和成交量"`);
+    const s = r.series;
+    const payload = { channel: r.channel, label: r.label, skill: r.skill, query: r.query, fields: s.fields, points: s.points, truncated: s.truncated, series: s.series };
+    if (o.save) {
+      const date = o.date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+      const f = cache.saveSnapshot({ type: o.save, date, data: payload });
+      log(`已检索并缓存分时序列: ${f}（${s.points} 个时间点 × ${s.fields.length} 字段）`);
+      return;
+    }
+    if (o.summary) {
+      const first = s.series[0], last = s.series[s.series.length - 1];
+      log(`${r.label}分时序列「${r.query}」：${s.points} 个时间点 × 字段 ${s.fields.join('/')}${s.truncated ? '（已截断保留末尾）' : ''}`);
+      log(`  区间: ${first.date} ${first.time} → ${last.date} ${last.time}`);
+      const show = s.series.length <= 12 ? s.series : [...s.series.slice(0, 6), null, ...s.series.slice(-6)];
+      for (const row of show) {
+        if (row === null) { log('  …'); continue; }
+        log(`  ${row.date} ${row.time}  ${s.fields.map((f) => `${f}=${row[f] ?? ''}`).join('  ')}`);
+      }
+      return;
+    }
+    console.log(JSON.stringify(payload, null, 2));
+    return;
   }
   if (o.save) {
     const date = o.date || new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
@@ -875,6 +901,7 @@ function cmdHelp() {
                              sector 板块筛选 / industry 行业 / profile 基本资料 / business 经营 /
                              etf ETF筛选 / cb 可转债；也可直接传技能 slug
                              默认输出纯 JSON；--summary 人读摘要；--raw 网关原始 JSON；--save 落缓存
+                             分时：--series 把「每列一个时间点」的宽表转成正序序列（问句要带时间范围+颗粒度）
 
 data 常用参数: --q / --thscodes / --thscode / --period annual|quarterly
   --limit / --report YYYY-N / --date / --start --end（YYYY-MM-DD 或毫秒戳）
@@ -934,7 +961,7 @@ export async function main() {
       'keep-days': { type: 'string' },
       save: { type: 'string' },
       q: { type: 'string' }, thscodes: { type: 'string' }, thscode: { type: 'string' },
-      channel: { type: 'string' }, raw: { type: 'boolean' },
+      channel: { type: 'string' }, raw: { type: 'boolean' }, series: { type: 'boolean' },
       limit: { type: 'string' }, offset: { type: 'string' }, interval: { type: 'string' },
       start: { type: 'string' }, end: { type: 'string' }, adjust: { type: 'string' },
       period: { type: 'string' }, report: { type: 'string' }, tag: { type: 'string' },
