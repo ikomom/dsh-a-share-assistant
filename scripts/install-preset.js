@@ -98,14 +98,19 @@ function replacer(text) {
 }
 
 // ── 把 preset 的"子插件行列表"编译成 0.1.7 的 patch 插入块 ────────────────────
-/** 本地 .mjs 引用改成绝对 file:// URL（insert 的相对路径锚点不可控，显式更稳） */
+/**
+ * 本地文件引用改成**字面**绝对路径（insert 的相对路径锚点不可控，显式更稳）。
+ * 注意：`name` 字段在 0.1.7 的 schema 里只接受 string，**不能写 `!!js` 表达式**——
+ * 声明在 registry 里被重新读取时表达式不会求值，会报
+ * `row N names no plugin (a "name" string is required)`，导致该预设的会话无法 resume。
+ * 因此这里直接写 `file://` URL 字符串（installer 装的时候路径已知）。
+ */
 function absoluteLocalPluginRefs(yaml) {
-  const quarantine = pathToFileURL(path.join(SRC_DIR, 'skill-quarantine.mjs')).href;
+  const quarantineUrl = pathToFileURL(path.join(SRC_DIR, 'skill-quarantine.mjs')).href;
+  const skillsDir = path.join(SRC_DIR, 'skills').split(path.sep).join('/');
   return yaml
-    .replace(/^(\s*name:\s*)\.\/skill-quarantine\.mjs\s*$(.*)$/m, `$1!!js process.getBuiltinModule('node:url').pathToFileURL('${SRC_DIR.split(path.sep).join('/')}/skill-quarantine.mjs').href$2`)
-    .replace(/^(\s*-\s*)!!js "process\.getBuiltinModule\('node:url'\)\.fileURLToPath\(new URL\('skills\/', baseUrl\)\)"\s*$/m, `$1'${path.join(SRC_DIR, 'skills').split(path.sep).join('/')}'`);
-  // 注：上面第二处把 customSkillDirs 的 baseUrl 写法换成绝对路径（新体系里 baseUrl 不再指向预设目录）
-  void quarantine;
+    .replace(/^(\s*name:\s*)\.\/skill-quarantine\.mjs\s*$(.*)$/m, `$1'${quarantineUrl}'$2`)
+    .replace(/^(\s*-\s*)!!js "process\.getBuiltinModule\('node:url'\)\.fileURLToPath\(new URL\('skills\/', baseUrl\)\)"\s*$/m, `$1'${skillsDir}'`);
 }
 
 /** 逐行缩进（保留空行与注释的相对结构） */
