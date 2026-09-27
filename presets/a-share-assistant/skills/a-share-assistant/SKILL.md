@@ -79,8 +79,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | **ETF/基金 持仓** | fund-holdings / fund-asset-allocation / fund-holders-top / fund-dividends | stock:<code>:holdings | 重仓股+行业集中度、股债配置、前十大持有人（含多期披露，按 report_date_ms 取最新）、分红记录 |
 | **基金诊断** | fund-diagnostics | stock:<code>:diagnostics | 维度评分/同类对比/韧性 |
 | **全市场导出** | market-dump-url（dump=daily-k/daily-k-10d/adjustment-factors） | — | Parquet 预签名链接（**5 分钟失效，禁止缓存/持久化**） |
-| **分钟 K 线（日内）** | 东财 `data --kind minute-kline --klt 5`（非官方，OHLCV+振幅） | kline-5m 等 | fuyao 高频端点被锁（code=2004）、K线只支持 1d；东财覆盖最近约 31 个交易日，失败自动降级问财 |
-| **当日分时+均价线** | 东财 `data --kind trends`（非官方，含均价） | trends | 问财 `search --channel market --series` 为降级路径（仅收盘价） |
+| **分钟 K 线（日内）** | `data --kind minute-kline --klt 5`（链：东财→腾讯→问财） | kline-5m 等 | fuyao 高频端点被锁（code=2004）、K线只支持 1d；东财≈最近 31 个交易日（含额），腾讯 320 根上限（无额），问财仅收盘价 |
+| **当日/多日分时** | `data --kind trends [--ndays 5]`（东财有 OHLC+均价；多日只有腾讯） | trends / trends-5d | 三来源链，输出标注实际来源；口径差异见「分时」小节 |
 | **公告** | 问财渠道 `search --channel announcement`（iwencai 技能 announcement-search） | announcement | 沪深北公告全文检索 + 原文/PDF 链接；**fuyao 无此能力** |
 | **新闻/资讯** | 问财渠道 `search --channel news`（iwencai 技能 news-search） | news | 官媒/财经媒体/行业站 + 券商研报摘要；题材催化剂的直接来源 |
 | **全市场涨跌家数（广度）** | `daily-snapshot` 落 `breadth`（一次全市场快照 + 本地聚合） | breadth | 5575 只的涨/跌/平家数，复盘"普涨普跌"的硬口径；明细 1.2MB **不进上下文** |
@@ -219,24 +219,44 @@ node __PROJECT_ROOT__/src/cli.js search --channel report      --q "人形机器�
 - **输出两种形态**：`announcement|news|report` 返回 `items[{date,title,source,url,summary}]`；其余（`astock|market|finance|event|holder|research|macro|index|sector|industry|profile|business|etf|cb`）返回**中文列表格** `columns[] + items[]（行对象）`。默认纯 JSON；`--summary` 人读摘要；`--raw` 网关原始 JSON；`--save <type>` 落缓存。
 - **直接传技能 slug 也行**：`--channel hithink-astock-selector`（以后新装技能无需改代码）。
 
-### 分时（日内分钟线）—— 东财优先，问财降级
+### 分时（日内分钟线）—— 三来源降级链：东财 → 腾讯 → 问财
 
-fuyao 的**高频端点对外被锁**（`high-frequency/intraday|historical` 实测 `code=2004`，仅同花顺AI客户端），`price-historical` **只支持 1d**（传 `5m` 报 `code=1002`）。日内数据走下面两条路：
+fuyao 的**高频端点对外被锁**（`high-frequency/intraday|historical` 实测 `code=2004`，仅同花顺AI客户端），`price-historical` **只支持 1d**（传 `5m` 报 `code=1002`）。日内数据走**三来源降级链**：
 
-**① 首选：东方财富分钟 K 线（结构化 OHLCV，非官方接口）**
+**来源链：东财 → 腾讯 → 问财**（自动逐级降级，输出里标注实际来源与失败原因；`--source em|tencent|iwencai` 可强制，`--no-fallback` 只试第一级）
 
 ```bash
-node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 600519.SH --klt 5 --limit 48 --summary   # 5 分钟 K 线
-node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 300750.SZ --klt 1 --summary             # 1 分钟（仅当日）
-node __PROJECT_ROOT__/src/cli.js data --kind trends      --thscode 600519.SH --summary                      # 当日分时（多一列均价）
-node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 510300.SH --klt 15 --save kline-15m      # ETF/指数同样支持
+# 分钟 K 线（东财优先）
+node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 600519.SH --klt 5 --limit 48 --summary
+node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 300750.SZ --klt 1 --summary
+# 当日分时（东财有 OHLC+均价；腾讯只有价格+累计量额）
+node __PROJECT_ROOT__/src/cli.js data --kind trends --thscode 600519.SH --summary
+# 多日分时（**只有腾讯有**；--ndays>1 时东财不进链）
+node __PROJECT_ROOT__/src/cli.js data --kind trends --thscode 600519.SH --ndays 5 --save trends-5d
+# 强制某个来源 / 落盘
+node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 600519.SH --klt 5 --source tencent --save kline-5m
 ```
 
-- **参数**：`--klt 1|5|15|30|60`（分钟）、`--limit N` 取末尾 N 根、`--save <type>`、`--no-fallback`。
-- **覆盖深度（实测）**：`klt=1` 仅**当日**（240 根）；`klt=5/15/30/60` 只给**最近约 31 个交易日**；更早的分钟历史两个源都没有。
-- **⚠️ 风险**：这是东财**网页端公开 JSON 接口，非官方、无文档、无授权声明**，随时可能变更或限流，**仅建议个人自用**；不要高频轮询。
-- **⚠️ 已知坑（实测）**：① `fqt` **必填**，漏掉直接 0 条；② `lmt`（最近 N 根）**只在不带 `beg` 时生效**，带 `beg` 会返回整段；③ `fqt=1`（前复权）的**早期日线是坏的**（茅台 2001 首日收盘 -312.47）→ 本项目**只用它取分钟线**，日线一律走 fuyao `price-historical`。
-- **降级**：东财不可用时 CLI **自动回退问财**并标注 `数据来源 iwencai(降级，仅收盘价)`——降级后只有收盘价、没有 OHLC/量。
+### 各来源的实测边界与口径（**照这个用，别凭常识猜**）
+
+| | 东财（首选） | 腾讯（第二级） | 问财（末级降级） |
+| :--- | :--- | :--- | :--- |
+| 分钟 K 线 | `klt=1/5/15/30/60`，**含成交额** | `m1/m5/m15/m30/m60`，**每周期硬上限 320 根**，**无成交额**（有成交量+万分比换手） | — |
+| 覆盖深度 | 1 分钟=**当日**；5~60 分钟=**约最近 31 个交易日** | 1 分钟≈1.3 天；5 分钟≈7 天（都受 320 根限制） | 近 N 个交易日 |
+| 当日分时 | 241 点，**有 OHLC+均价+成交额** | 267 点，只有「价格 + **累计**量(手) + **累计**额(元)」，**无均价字段**（自算 额/(量×100)） | 问句带什么字段就有什么 |
+| 多日分时 | ❌ `ndays` 实测不生效（会静默只给当日） | ✅ `day/query` 固定最近 **5 个交易日 × 267 点** | ❌ |
+| 单位/口径 | **单分钟**量(手) + 额(元) | 分时是**累计**（差分才是单分钟）；K 线 `[5]` 是单根量(手) | 成交量是**累计股数**（与东财口径不同，别混） |
+
+### 三个必须知道的坑（全部实测）
+
+1. **东财 `fqt` 必填**（漏掉直接 0 条）；**`lmt` 只在不带 `beg` 时生效**（带 `beg` 会返回整段）。
+2. **腾讯 `mkline` 的 `param` 第 3 段必须留空**（`code,周期,,条数`）：填任何值都 **静默返回空数组**，且 `code` 仍是 0 —— **只校验 code 会误判成功**，必须判空。
+3. **腾讯分时的 15:06–15:30 共 25 个点是盘后成交**（价格恒为收盘价、量额继续增长，**不计入日成交量**），做指标时按 `session === 'after'` 剔除；且它**没有集合竞价点**，`1300` 是 `1130` 的占位重复。
+
+### 风险
+
+东财、腾讯都是**网页端公开 JSON 接口：非官方、无公开文档、无授权声明**，随时可能变更或限流，**仅建议个人自用**；本项目只用它们取日内数据，**日线一律走 fuyao `price-historical`**（东财/腾讯的前复权口径实测有负价等问题）。
+两个渠道的逐参数实测手册在仓库：`docs/eastmoney-api.md`、`docs/tencent-api.md`。
 
 **② 降级/补充：问财分时（`--channel market --series`）**
 

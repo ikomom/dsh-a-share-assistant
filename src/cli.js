@@ -12,6 +12,7 @@ import { buildHoldingsHtml } from './report-html.js';
 import { fetchMarketContext, fetchMarketBreadth, resolveTradingDay } from './market.js';
 import * as iwencai from './iwencai.js';
 import * as eastmoney from './eastmoney.js';
+import * as tencent from './tencent.js';
 import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, reviewDir, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
@@ -80,13 +81,19 @@ async function cmdCheck(opts = {}) {
   }
   const ready = dl.keyOk && dl.endpointsCount > 0 && dl.probe.ok;
   log(ready ? '→ 数据链路就绪，可以取数' : '→ 数据链路未就绪：请先补 key / 端点映射后再取数，不要现场翻源码找接口');
-  // 东财分钟线探活（非官方接口）：只做提示，失败不影响链路就绪判定
+  // 日内数据来源探活（都是非官方接口）：只做提示，失败不影响链路就绪判定
   if (!opts.quick) {
     try {
       const em = await eastmoney.eastmoneyProbe('600519.SH');
       log(`分钟K线(东财,非官方): ${em.ok ? `✅ ${em.detail}` : `⚠ ${em.detail}`}`);
     } catch (e) {
-      log(`分钟K线(东财,非官方): ⚠ 不可用（${e.message}）→ 会自动降级问财分时（\`search --channel market --series\`）`);
+      log(`分钟K线(东财,非官方): ⚠ 不可用（${e.message}${e.cause?.code ? `/${e.cause.code}` : ''}）→ 自动降级腾讯`);
+    }
+    try {
+      const tx = await tencent.tencentProbe('600519.SH');
+      log(`分钟K线(腾讯,非官方): ${tx.ok ? `✅ ${tx.detail}` : `⚠ ${tx.detail}`}`);
+    } catch (e) {
+      log(`分钟K线(腾讯,非官方): ⚠ 不可用（${e.message}）→ 再降级问财（仅收盘价）`);
     }
   }
   if (opts.quick) return; // --quick：只看链路就绪，跳过缓存索引与参数速查
@@ -216,7 +223,7 @@ async function cmdData(opts) {
   }
   // ── 非 fuyao 端点：东方财富分钟 K 线 / 当日分时（非官方接口，见 src/eastmoney.js 头注释）──
   if (kind === 'minute-kline' || kind === 'trends') {
-    return cmdEastmoney(kind, opts);
+    return cmdIntraday(kind, opts);
   }
   const spec = ENDPOINTS[kind];
   // --help：输出该端点的参数说明与示例（无需取数）
@@ -293,23 +300,26 @@ async function cmdData(opts) {
 }
 
 /**
- * 东财分钟 K 线 / 当日分时（**非官方**接口，见 src/eastmoney.js 头注释）。
- * 失败时默认回退问财 `--series`，并明确标注"降级 + 字段损失"；--no-fallback 可关闭。
+ * 日内数据（分钟 K 线 / 当日分时）—— 多来源**降级链**：东财 → 腾讯 → 问财。
+ * 每个来源的参数与边界都来自实测（见 src/eastmoney.js、src/tencent.js 头注释与 docs/*-api.md）。
+ * 降级只兜"来源不可用"，不兜"用户传错参数"；输出里始终标注实际来源与失败原因。
  */
-async function cmdEastmoney(kind, opts) {
+async function cmdIntraday(kind, opts) {
   const thscode = opts.thscode || opts.thscodes;
   const isMin = kind === 'minute-kline';
   if (opts.help) {
     if (isMin) {
-      log('端点: minute-kline（东方财富，非官方接口）— 分钟 K 线 OHLCV + 振幅');
+      log('端点: minute-kline（分钟 K 线）— 来源链 东财 → 腾讯 → 问财');
       log('必填: --thscode 600519.SH（ETF/指数同样支持：510300.SH、000001.SH）');
       log(`--klt 取值: ${eastmoney.MINUTE_KLTS.join(' | ')}（分钟）；日/周/月走 --kind price-historical`);
-      log('可选: --limit N（取末尾 N 根）｜--save <type>｜--no-fallback');
-      log('注意: 非官方接口可能随时变更；1 分钟仅当日，5/15/30/60 分钟约最近 31 个交易日');
+      log('可选: --limit N（取末尾 N 根）｜--save <type>｜--source em|tencent|iwencai｜--no-fallback');
+      log('覆盖: 东财 1 分钟=当日、5~60 分钟≈最近 31 个交易日（含成交额）；腾讯每周期上限 320 根（无成交额）；问财仅收盘价');
       log(`示例: node ${PROJECT_ROOT}/src/cli.js data --kind minute-kline --thscode 600519.SH --klt 5 --limit 48 --summary`);
     } else {
-      log('端点: trends（东方财富，非官方接口）— 当日分时，比 kline 多一列「均价」（分时均线）');
-      log('必填: --thscode 600519.SH；可选 --ndays 1（实测多日不生效）｜--save <type>');
+      log('端点: trends（当日分时，含均价）— 来源链 东财 → 腾讯 → 问财');
+      log('必填: --thscode 600519.SH');
+      log('可选: --ndays N（>1 时改用腾讯 day/query 多日分时，实测固定最近 5 个交易日）｜--save <type>｜--source ...');
+      log('口径: 东财有 OHLC+均价；腾讯只有「价格+累计量+累计额」（均价自算，且含 15:06–15:30 盘后点）');
       log(`示例: node ${PROJECT_ROOT}/src/cli.js data --kind trends --thscode 600519.SH --summary`);
     }
     return;
@@ -320,41 +330,85 @@ async function cmdEastmoney(kind, opts) {
   if (isMin && !eastmoney.MINUTE_KLTS.includes(klt)) {
     fail(`minute-kline 的 --klt 只支持 ${eastmoney.MINUTE_KLTS.join('/')}（分钟）；日/周/月请用 --kind price-historical`);
   }
-  let out = null;
-  let emErr = null;
-  try {
-    out = isMin
-      ? await eastmoney.fetchMinuteKline({ thscode, klt, limit: opts.limit })
-      : await eastmoney.fetchTrends({ thscode, ndays: opts.ndays });
-  } catch (e) {
-    emErr = e;
+  const ndays = opts.ndays ? Math.max(1, Number(opts.ndays)) : 1;
+  const forced = String(opts.source || 'auto').toLowerCase();
+  const want = (s) => forced === 'auto' || forced === s;
+
+  // 来源链：顺序即优先级。多日分时**只有腾讯有**（东财 trends 的 ndays 实测不生效，会静默只给当日），
+  // 所以 ndays>1 时不能把东财排在前面——它会"成功"返回单日数据，让降级永远不触发。
+  const multiDay = !isMin && ndays > 1;
+  /** 失败原因带上底层 cause（如 UND_ERR_SOCKET），否则只剩一句 fetch failed 没法排查 */
+  const errText = (e) => `${e?.message || e}${e?.cause?.code ? `（${e.cause.code}）` : ''}`;
+  const chain = [];
+  const addEm = () => chain.push({
+    label: '东财',
+    run: () => (isMin
+      ? eastmoney.fetchMinuteKline({ thscode, klt, limit: opts.limit })
+      : eastmoney.fetchTrends({ thscode, ndays })),
+  });
+  const addTx = () => chain.push({
+    label: '腾讯',
+    run: () => (isMin
+      ? tencent.fetchMinuteKline({ thscode, klt, limit: opts.limit })
+      : multiDay
+        ? tencent.fetchMultiDayTrends({ thscode, days: ndays })
+        : tencent.fetchTrends({ thscode })),
+  });
+  const addIw = () => chain.push({ label: '问财', run: () => eastmoney.fallbackIwencaiSeries({ thscode, klt: isMin ? klt : 1 }) });
+  if (multiDay) {
+    if (want('tencent')) addTx();
+    if (want('iwencai')) addIw(); // 东财无多日分时能力，不进链
+  } else {
+    if (want('em')) addEm();
+    if (want('tencent')) addTx();
+    if (want('iwencai')) addIw();
   }
-  let degraded = null;
-  let degErr = null;
-  if (!out && !opts['no-fallback']) {
+  if (!chain.length) fail(`--source 只支持 em | tencent | iwencai | auto（当前: ${opts.source}${multiDay ? '；多日分时没有东财来源' : ''}）`);
+  if (opts['no-fallback'] && chain.length > 1) chain.length = 1;
+
+  const errors = [];
+  let payload = null;
+  let used = null;
+  for (const src of chain) {
     try {
-      degraded = await eastmoney.fallbackIwencaiSeries({ thscode, klt });
+      payload = await src.run();
+      used = src.label;
+      break;
     } catch (e) {
-      degErr = e;
+      errors.push(`${src.label}: ${errText(e)}`);
     }
   }
-  if (!out && !degraded) {
-    fail(`东财取数失败: ${emErr?.message || '无数据'}${opts['no-fallback'] ? '（--no-fallback 已关闭降级）' : `；问财降级也失败: ${degErr?.message || '无问财 Key 或通道未启用'}`}`);
+  if (!payload) {
+    fail(`${kind} ${thscode} 所有来源都失败：\n  ${errors.join('\n  ')}`);
   }
-  const payload = out ?? degraded;
-  const srcNote = out ? `数据来源 ${out.source}` : `数据来源 ${degraded.source}（东财失败：${emErr?.message}）`;
+  if (isMin && payload.klt === undefined) payload.klt = klt; // 降级来源（问财）没有 klt 字段，用请求值标注
+  if (multiDay) payload.notes = [...(payload.notes || []), '多日分时只有腾讯提供（东财 ndays 实测不生效，会静默只返回当日）'];
+  const degraded = used !== chain[0].label;
+  const srcNote = `来源 ${payload.source}${degraded ? `（${chain.slice(0, chain.findIndex((s) => s.label === used)).map((s) => `${s.label}失败`).join('、')}）` : ''}`;
+  const notes = Array.isArray(payload.notes) ? payload.notes : [];
+
   if (opts.save) {
     const f = cache.saveStock({ code: String(thscode).split('.')[0], type: opts.save, data: payload });
     log(`已取数并缓存: ${f}（${srcNote}，${payload.rows.length} 条）`);
     return;
   }
   if (opts.summary) {
-    const head = `${isMin ? `分钟K线 klt=${payload.klt}` : '当日分时'}｜${payload.name || thscode}｜共 ${payload.total} 条｜${srcNote}`;
-    log(head);
+    const label = isMin ? `分钟K线 klt=${payload.klt}` : payload.days > 1 ? `多日分时（${payload.days} 天）` : '当日分时';
+    log(`${label}｜${payload.name || thscode}｜共明细 ${payload.total} 条，本次显示 ${payload.rows.length}｜${srcNote}`);
+    for (const n of notes.slice(0, 2)) log(`  注: ${n}`);
     const show = payload.rows.length <= 8 ? payload.rows : [...payload.rows.slice(0, 4), null, ...payload.rows.slice(-4)];
     for (const r of show) {
       if (r === null) { log('  …'); continue; }
-      log(`  ${r.time}  ${r.close !== undefined && r.open === undefined ? `收盘价=${r.close}` : `开${r.open} 收${r.close} 高${r.high} 低${r.low} 量${r.volumeLots}手${r.avgPrice !== undefined ? ` 均价${r.avgPrice}` : ''}`}`);
+      const cols = [`收${r.close}`];
+      if (r.open !== undefined) cols.unshift(`开${r.open}`);
+      if (r.high !== undefined) cols.push(`高${r.high} 低${r.low}`);
+      if (r.volumeLots !== undefined && r.volumeLots !== null) cols.push(`量${r.volumeLots}手`);
+      if (r.turnoverCny) cols.push(`额${r.turnoverCny}`);
+      if (r.avgPrice !== undefined && r.avgPrice !== null) cols.push(`均价${r.avgPrice}`);
+      if (r.turnoverRatePct !== undefined && r.turnoverRatePct !== null) cols.push(`换手${r.turnoverRatePct}%`);
+      if (r.session === 'after') cols.push('(盘后)');
+      if (r.placeholder) cols.push('(占位)');
+      log(`  ${r.time}  ${cols.join(' ')}`);
     }
     return;
   }
@@ -1048,7 +1102,7 @@ export async function main() {
       save: { type: 'string' },
       q: { type: 'string' }, thscodes: { type: 'string' }, thscode: { type: 'string' },
       channel: { type: 'string' }, raw: { type: 'boolean' }, series: { type: 'boolean' },
-  klt: { type: 'string' }, ndays: { type: 'string' }, 'no-fallback': { type: 'boolean' },
+  klt: { type: 'string' }, ndays: { type: 'string' }, 'no-fallback': { type: 'boolean' }, source: { type: 'string' },
       limit: { type: 'string' }, offset: { type: 'string' }, interval: { type: 'string' },
       start: { type: 'string' }, end: { type: 'string' }, adjust: { type: 'string' },
       period: { type: 'string' }, report: { type: 'string' }, tag: { type: 'string' },
