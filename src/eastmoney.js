@@ -8,9 +8,11 @@
 //   klt=1  → 仅当日 240 根；klt=5 → 最近 ≈31 个交易日 1488 根；klt=15/30/60 → 同样窗口
 //   ETF/指数同样支持（510300 → secid 1.510300；上证指数 → 1.000001）
 //
-// 已知坑：
-//   ① fqt=1（前复权）的**早期日线是坏的**（茅台 2001-08-27 收盘 -312.47）—— 复权序列请用 fqt=2（后复权）
-//   ② lmt 不是硬行数上限（klt=5&lmt=6 仍返回整段）—— 按返回内容截取，别依赖它
+// 已知坑（均为实测）：
+//   ① **fqt 必填**：漏掉 fqt 直接返回 data=null（0 条），不是默认值
+//   ② **lmt 与 beg 互斥**：`lmt=N` 取"最近 N 根"，但**只要带 beg，lmt 就被忽略、返回 beg 之后的整段**
+//      （`klt=5&lmt=5` → 5 条；`klt=5&lmt=5&beg=0` → 1488 条）→ 本模块**不传 beg**，用 lmt 控深度
+//   ③ fqt=1（前复权）的**早期日线是坏的**（茅台 2001-08-27 收盘 -312.47）—— 复权序列请用 fqt=2（后复权）
 //
 // 风险：接口随时可能变更/限流；仅建议个人自用。插件侧默认在失败时回退问财 `search --channel market --series`。
 import { getData } from './fuyao.js';
@@ -54,8 +56,9 @@ export async function fetchMinuteKline({ thscode, klt = 5, limit } = {}) {
   const k = Number(klt);
   if (!MINUTE_KLTS.includes(k)) throw new Error(`klt 只支持 ${MINUTE_KLTS.join('/')}（分钟）；日/周/月请用 fuyao price-historical`);
   const secid = toSecid(thscode);
+  // 不传 beg（带 beg 会让 lmt 失效）；lmt 给足以拿到该源能提供的整段，再由 --limit 本地截取
   const url = `${KLINE}?secid=${secid}&ut=${UT}&fields1=f1,f2,f3,f4,f5,f6`
-    + `&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=${k}&fqt=1&beg=0&end=20500101&lmt=10000`;
+    + `&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=${k}&fqt=1&end=20500101&lmt=10000`;
   const data = await getJson(url, `东财分钟K线 ${secid}`);
   const raw = data.klines ?? [];
   const rows = raw.map((line) => {
