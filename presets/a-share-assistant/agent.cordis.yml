@@ -1,6 +1,9 @@
 # A股助手 preset：标准能力（shell/fs/网页/技能/计划/目标/子代理）+ persona 注入精简版协议 + 随附技能。
-# 结构参照官方 standard/cordis preset 精简而来；技能目录 skills/ 随 preset 一起移动。
-# 安装时 install-preset.js 会将 __PROJECT_ROOT__ 等占位符替换为本机路径。
+# 本文件是预设的"子插件行列表"（作者视角）。安装时 install-preset.js 会：
+#   ① 替换 __PROJECT_ROOT__/__CACHE_ROOT__/__REVIEW_DIR__/__NOTES_ROOT__/__PLATFORM_NOTE__/__SKILL_MD__ 占位符；
+#   ② 把 ./skill-quarantine.mjs 与 skills/ 目录改成绝对路径 / file:// URL（新体系里 baseUrl 不再指向预设目录）；
+#   ③ 整段包进 `- insert:` 写进 ~/.dsh/profiles/<profile>/cordis.patch.yml（DSH 0.1.7+ 的预设机制）。
+# 结构参照官方 standard/cordis preset 精简而来。
 # persona 只保留"必知"核心，细节（配置引导/复盘模板/交易台账/技能卫生）在 SKILL.md，避免每轮全额注入占 token。
 
 # ── persona（精简协议，始终可见）─────────────────────────────────────────

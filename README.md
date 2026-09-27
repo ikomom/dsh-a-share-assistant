@@ -42,6 +42,22 @@ git clone https://github.com/ikomom/dsh-a-share-assistant.git && cd dsh-a-share-
 
 一条命令完成：预设安装 + 平台适配 + 配置引导（配置缺失时在终端交互询问是否生成；无交互环境则提示手动 `config --init`）。
 
+**预设是怎么装进去的（DSH 0.1.7+）**：预设不再是 `~/.dsh/.agent-presets/<id>/` 下的 yml 目录
+（0.1.7 起 registry 明确"不扫描目录、不接受预设路径"），而是 profile 组成里的一行
+`@deepseek-ai/dsh-agent-preset`。脚本因此把本预设写成**用户层 patch**：
+
+```
+~/.dsh/profiles/web/cordis.patch.yml     ← 标记块插入，重装覆盖、--uninstall 移除
+   - insert:
+       - id: preset-a-share-assistant
+         name: '@deepseek-ai/dsh-agent-preset'
+         config: { id: a-share-assistant, name: A股助手, order: 5, plugins: [ ...本预设的插件行... ] }
+```
+
+- 本预设直接从本仓库目录读取（技能目录 + skill-quarantine 插件都是绝对路径），不再往 `~/.dsh` 复制副本 → 改仓库即生效（重启后）。
+- **装完要重启 `dsh web`**：patch 在启动时合成，运行中的实例不会热加载新预设。
+- 其它参数：`--profile <名字>`（默认 web）、`--print`（只看生成的 patch）、`--uninstall`（移除本预设，保留你其它的 patch）。
+
 之后编辑 `./.a-share-assistant/config.json` 填写：
 
 ```jsonc

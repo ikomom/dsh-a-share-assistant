@@ -13,7 +13,14 @@
    （克隆到当前工作目录；若我指定了别的目录则用指定的）。
 3. 安装预设：运行
    `node dsh-a-share-assistant/scripts/install-preset.js`
-   （复制预设到 ~/.dsh/.agent-presets/ 并按本机平台适配 persona）。
+   它会把「A股助手」写成 DSH 的 **profile patch**（DSH 0.1.7+ 的预设机制）：
+   在 `~/.dsh/profiles/web/cordis.patch.yml` 里插入一行 `@deepseek-ai/dsh-agent-preset`
+   并带上本机路径适配（persona/缓存/复盘目录/技能目录）。
+   - 若报"找不到 profile 目录"：说明该 profile 还没启动过，先让我跑一次 `dsh web` 再装；
+     或用 `--profile <名字>` 指定其它 profile（如 `dsh-tui`）。
+   - 装完**必须重启 `dsh web`**（patch 在启动时合成；正在运行的实例看不到新预设），
+     之后「新建会话」的预设列表里就有「A股助手」。
+   - 旧版 `~/.dsh/.agent-presets/` 目录在 0.1.7 起已不被扫描，脚本会提示清理。
 4. 生成配置：运行
    `node dsh-a-share-assistant/src/cli.js config --init`
    然后打开 `.a-share-assistant/config.json`（即 dsh-a-share-assistant 所在目录下的 .a-share-assistant/config.json）：
