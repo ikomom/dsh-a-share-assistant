@@ -46,6 +46,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | 龙虎榜 | `--board-type all\|org\|hot_money --date YYYY-MM-DD` | date 省略取最近交易日 |
 | 板块 | `--tag cn_concept\|industry` | THS 概念/行业目录 |
 | **ETF/基金** | `--thscode 510300.SH`（**单只、不复数**） | ETF 行情/日线/资料/收益/净值/回撤/持仓/诊断；A股端点查 ETF 会报 `code=3004` |
+| **分钟K线**（东财，非官方） | `data --kind minute-kline --thscode 600519.SH --klt 5 --limit 48` | klt=1/5/15/30/60；1 分钟仅当日、5~60 约最近 31 个交易日；失败自动降级问财 |
+| **当日分时**（东财，非官方） | `data --kind trends --thscode 600519.SH` | 241 点，含均价线（分时均线） |
 | **全市场导出** | `--dump daily-k\|daily-k-10d\|adjustment-factors` | 返回 Parquet 预签名链接（5 分钟有效，**不要缓存**）；需 pyarrow 读 |
 | **公告**（问财） | `search --channel announcement --q "标的+事件"` | fuyao 没有的消息面；返回标题/日期/来源/原文PDF链接 |
 | **新闻/资讯**（问财） | `search --channel news --q "主题或个股 最新"` | 官媒/财经媒体/行业站 + 券商研报摘要 |
@@ -77,7 +79,8 @@ description: A股研究助手深度参考。当用户进行选股、个股体检
 | **ETF/基金 持仓** | fund-holdings / fund-asset-allocation / fund-holders-top / fund-dividends | stock:<code>:holdings | 重仓股+行业集中度、股债配置、前十大持有人（含多期披露，按 report_date_ms 取最新）、分红记录 |
 | **基金诊断** | fund-diagnostics | stock:<code>:diagnostics | 维度评分/同类对比/韧性 |
 | **全市场导出** | market-dump-url（dump=daily-k/daily-k-10d/adjustment-factors） | — | Parquet 预签名链接（**5 分钟失效，禁止缓存/持久化**） |
-| **日内分时（分钟线）** | 问财渠道 `search --channel market --series`（问句带范围+颗粒度） | minute-<code> 等 | fuyao 高频端点被锁（code=2004）、K线只支持 1d；分时只能走问财 |
+| **分钟 K 线（日内）** | 东财 `data --kind minute-kline --klt 5`（非官方，OHLCV+振幅） | kline-5m 等 | fuyao 高频端点被锁（code=2004）、K线只支持 1d；东财覆盖最近约 31 个交易日，失败自动降级问财 |
+| **当日分时+均价线** | 东财 `data --kind trends`（非官方，含均价） | trends | 问财 `search --channel market --series` 为降级路径（仅收盘价） |
 | **公告** | 问财渠道 `search --channel announcement`（iwencai 技能 announcement-search） | announcement | 沪深北公告全文检索 + 原文/PDF 链接；**fuyao 无此能力** |
 | **新闻/资讯** | 问财渠道 `search --channel news`（iwencai 技能 news-search） | news | 官媒/财经媒体/行业站 + 券商研报摘要；题材催化剂的直接来源 |
 | **全市场涨跌家数（广度）** | `daily-snapshot` 落 `breadth`（一次全市场快照 + 本地聚合） | breadth | 5575 只的涨/跌/平家数，复盘"普涨普跌"的硬口径；明细 1.2MB **不进上下文** |
@@ -216,9 +219,26 @@ node __PROJECT_ROOT__/src/cli.js search --channel report      --q "人形机器�
 - **输出两种形态**：`announcement|news|report` 返回 `items[{date,title,source,url,summary}]`；其余（`astock|market|finance|event|holder|research|macro|index|sector|industry|profile|business|etf|cb`）返回**中文列表格** `columns[] + items[]（行对象）`。默认纯 JSON；`--summary` 人读摘要；`--raw` 网关原始 JSON；`--save <type>` 落缓存。
 - **直接传技能 slug 也行**：`--channel hithink-astock-selector`（以后新装技能无需改代码）。
 
-### 分时（日内分钟线）—— 只能走问财
+### 分时（日内分钟线）—— 东财优先，问财降级
 
-fuyao 的**高频端点对外被锁**（`high-frequency/intraday|historical` 实测 `code=2004`，仅同花顺AI客户端），`price-historical` **只支持 1d**（传 `5m` 报 `code=1002`）。所以日内分时用问财 `--channel market --series`：
+fuyao 的**高频端点对外被锁**（`high-frequency/intraday|historical` 实测 `code=2004`，仅同花顺AI客户端），`price-historical` **只支持 1d**（传 `5m` 报 `code=1002`）。日内数据走下面两条路：
+
+**① 首选：东方财富分钟 K 线（结构化 OHLCV，非官方接口）**
+
+```bash
+node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 600519.SH --klt 5 --limit 48 --summary   # 5 分钟 K 线
+node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 300750.SZ --klt 1 --summary             # 1 分钟（仅当日）
+node __PROJECT_ROOT__/src/cli.js data --kind trends      --thscode 600519.SH --summary                      # 当日分时（多一列均价）
+node __PROJECT_ROOT__/src/cli.js data --kind minute-kline --thscode 510300.SH --klt 15 --save kline-15m      # ETF/指数同样支持
+```
+
+- **参数**：`--klt 1|5|15|30|60`（分钟）、`--limit N` 取末尾 N 根、`--save <type>`、`--no-fallback`。
+- **覆盖深度（实测）**：`klt=1` 仅**当日**（240 根）；`klt=5/15/30/60` 只给**最近约 31 个交易日**；更早的分钟历史两个源都没有。
+- **⚠️ 风险**：这是东财**网页端公开 JSON 接口，非官方、无文档、无授权声明**，随时可能变更或限流，**仅建议个人自用**；不要高频轮询。
+- **⚠️ 已知坑**：东财 `fqt=1`（前复权）的**早期日线是坏的**（茅台 2001 首日收盘 -312.47），所以本项目**只用它取分钟线**，日线一律走 fuyao `price-historical`；`lmt` 也不是硬行数上限。
+- **降级**：东财不可用时 CLI **自动回退问财**并标注 `数据来源 iwencai(降级，仅收盘价)`——降级后只有收盘价、没有 OHLC/量。
+
+**② 降级/补充：问财分时（`--channel market --series`）**
 
 ```bash
 # 单日 1 分钟（收盘价 + 成交量）

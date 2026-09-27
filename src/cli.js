@@ -11,6 +11,7 @@ import * as position from './position.js';
 import { buildHoldingsHtml } from './report-html.js';
 import { fetchMarketContext, fetchMarketBreadth, resolveTradingDay } from './market.js';
 import * as iwencai from './iwencai.js';
+import * as eastmoney from './eastmoney.js';
 import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, reviewDir, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
@@ -79,6 +80,15 @@ async function cmdCheck(opts = {}) {
   }
   const ready = dl.keyOk && dl.endpointsCount > 0 && dl.probe.ok;
   log(ready ? '→ 数据链路就绪，可以取数' : '→ 数据链路未就绪：请先补 key / 端点映射后再取数，不要现场翻源码找接口');
+  // 东财分钟线探活（非官方接口）：只做提示，失败不影响链路就绪判定
+  if (!opts.quick) {
+    try {
+      const em = await eastmoney.eastmoneyProbe('600519.SH');
+      log(`分钟K线(东财,非官方): ${em.ok ? `✅ ${em.detail}` : `⚠ ${em.detail}`}`);
+    } catch (e) {
+      log(`分钟K线(东财,非官方): ⚠ 不可用（${e.message}）→ 会自动降级问财分时（\`search --channel market --series\`）`);
+    }
+  }
   if (opts.quick) return; // --quick：只看链路就绪，跳过缓存索引与参数速查
   log('-- 缓存索引 --');
   const st = cache.status();
@@ -202,7 +212,11 @@ function cmdCacheClean(opts) {
 async function cmdData(opts) {
   const kind = opts.kind;
   if (!kind) {
-    fail(`data 需要 --kind。可用端点: ${Object.keys(ENDPOINTS).join(', ')}（或跑 help/--kind --help 看参数说明）`);
+    fail(`data 需要 --kind。可用端点: ${Object.keys(ENDPOINTS).join(', ')}, minute-kline, trends（或跑 help/--kind --help 看参数说明）`);
+  }
+  // ── 非 fuyao 端点：东方财富分钟 K 线 / 当日分时（非官方接口，见 src/eastmoney.js 头注释）──
+  if (kind === 'minute-kline' || kind === 'trends') {
+    return cmdEastmoney(kind, opts);
   }
   const spec = ENDPOINTS[kind];
   // --help：输出该端点的参数说明与示例（无需取数）
@@ -278,8 +292,76 @@ async function cmdData(opts) {
   console.log(JSON.stringify(result, null, 2));
 }
 
-/** 取数结果的精简摘要：数组类只显示总数+前几条，避免大 JSON 灌入上下文 */
-function printDataSummary(result) {
+/**
+ * 东财分钟 K 线 / 当日分时（**非官方**接口，见 src/eastmoney.js 头注释）。
+ * 失败时默认回退问财 `--series`，并明确标注"降级 + 字段损失"；--no-fallback 可关闭。
+ */
+async function cmdEastmoney(kind, opts) {
+  const thscode = opts.thscode || opts.thscodes;
+  const isMin = kind === 'minute-kline';
+  if (opts.help) {
+    if (isMin) {
+      log('端点: minute-kline（东方财富，非官方接口）— 分钟 K 线 OHLCV + 振幅');
+      log('必填: --thscode 600519.SH（ETF/指数同样支持：510300.SH、000001.SH）');
+      log(`--klt 取值: ${eastmoney.MINUTE_KLTS.join(' | ')}（分钟）；日/周/月走 --kind price-historical`);
+      log('可选: --limit N（取末尾 N 根）｜--save <type>｜--no-fallback');
+      log('注意: 非官方接口可能随时变更；1 分钟仅当日，5/15/30/60 分钟约最近 31 个交易日');
+      log(`示例: node ${PROJECT_ROOT}/src/cli.js data --kind minute-kline --thscode 600519.SH --klt 5 --limit 48 --summary`);
+    } else {
+      log('端点: trends（东方财富，非官方接口）— 当日分时，比 kline 多一列「均价」（分时均线）');
+      log('必填: --thscode 600519.SH；可选 --ndays 1（实测多日不生效）｜--save <type>');
+      log(`示例: node ${PROJECT_ROOT}/src/cli.js data --kind trends --thscode 600519.SH --summary`);
+    }
+    return;
+  }
+  if (!thscode) fail(`${kind} 需要 --thscode（如 600519.SH / 510300.SH / 000001.SH）`);
+  const klt = opts.klt ? Number(opts.klt) : 5;
+  // 参数错误直接失败、不去试降级（降级只兜"接口不可用"，不兜"用户传错参数"）
+  if (isMin && !eastmoney.MINUTE_KLTS.includes(klt)) {
+    fail(`minute-kline 的 --klt 只支持 ${eastmoney.MINUTE_KLTS.join('/')}（分钟）；日/周/月请用 --kind price-historical`);
+  }
+  let out = null;
+  let emErr = null;
+  try {
+    out = isMin
+      ? await eastmoney.fetchMinuteKline({ thscode, klt, limit: opts.limit })
+      : await eastmoney.fetchTrends({ thscode, ndays: opts.ndays });
+  } catch (e) {
+    emErr = e;
+  }
+  let degraded = null;
+  let degErr = null;
+  if (!out && !opts['no-fallback']) {
+    try {
+      degraded = await eastmoney.fallbackIwencaiSeries({ thscode, klt });
+    } catch (e) {
+      degErr = e;
+    }
+  }
+  if (!out && !degraded) {
+    fail(`东财取数失败: ${emErr?.message || '无数据'}${opts['no-fallback'] ? '（--no-fallback 已关闭降级）' : `；问财降级也失败: ${degErr?.message || '无问财 Key 或通道未启用'}`}`);
+  }
+  const payload = out ?? degraded;
+  const srcNote = out ? `数据来源 ${out.source}` : `数据来源 ${degraded.source}（东财失败：${emErr?.message}）`;
+  if (opts.save) {
+    const f = cache.saveStock({ code: String(thscode).split('.')[0], type: opts.save, data: payload });
+    log(`已取数并缓存: ${f}（${srcNote}，${payload.rows.length} 条）`);
+    return;
+  }
+  if (opts.summary) {
+    const head = `${isMin ? `分钟K线 klt=${payload.klt}` : '当日分时'}｜${payload.name || thscode}｜共 ${payload.total} 条｜${srcNote}`;
+    log(head);
+    const show = payload.rows.length <= 8 ? payload.rows : [...payload.rows.slice(0, 4), null, ...payload.rows.slice(-4)];
+    for (const r of show) {
+      if (r === null) { log('  …'); continue; }
+      log(`  ${r.time}  ${r.close !== undefined && r.open === undefined ? `收盘价=${r.close}` : `开${r.open} 收${r.close} 高${r.high} 低${r.low} 量${r.volumeLots}手${r.avgPrice !== undefined ? ` 均价${r.avgPrice}` : ''}`}`);
+    }
+    return;
+  }
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+/** 取数结果的精简摘要：数组类只显示总数+前几条，避免大 JSON 灌入上下文 */function printDataSummary(result) {
   const data = result?.data ?? result;
   let c = '';
   if (Array.isArray(data)) c = `（数组 ${data.length} 条）`;
@@ -891,6 +973,10 @@ function cmdHelp() {
   data           --kind K [参数] [--save T [--code X] [--date D] | --summary]
                             取数并可选落缓存（--save 指定缓存类型；--code 存个股级）。
                             默认输出完整 JSON；--summary 只出简化摘要，--save 落盘不打印（省 token）
+                            K 除 fuyao 端点外还支持：
+                              minute-kline --thscode 600519.SH --klt 1|5|15|30|60 [--limit N]  分钟 K 线
+                              trends       --thscode 600519.SH                                当日分时（含均价线）
+                            （东财网页端非官方接口，可能随时变更；失败自动降级问财分时）
   investigate    --code X [--report YYYY-N]
                             一键个股体检（拉齐行情/三表/估值/异动并落盘）
   daily-snapshot [--date D]  一键每日复盘快照（涨停/跌停/炸板/连板/龙虎榜/热榜/板块/指数落盘）
@@ -962,6 +1048,7 @@ export async function main() {
       save: { type: 'string' },
       q: { type: 'string' }, thscodes: { type: 'string' }, thscode: { type: 'string' },
       channel: { type: 'string' }, raw: { type: 'boolean' }, series: { type: 'boolean' },
+  klt: { type: 'string' }, ndays: { type: 'string' }, 'no-fallback': { type: 'boolean' },
       limit: { type: 'string' }, offset: { type: 'string' }, interval: { type: 'string' },
       start: { type: 'string' }, end: { type: 'string' }, adjust: { type: 'string' },
       period: { type: 'string' }, report: { type: 'string' }, tag: { type: 'string' },
