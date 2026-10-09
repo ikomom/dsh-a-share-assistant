@@ -656,6 +656,69 @@ function reviewMarkdown(a) {
   return L.join('\n');
 }
 
+/** 供 AI 复盘搭子使用的精炼事实卡（~1KB，抓大放小，不堆砌大表格） */
+function formatReviewBrief(a, market, pSummary) {
+  const s = a.summary;
+  const L = [];
+  L.push(`==================== 今日复盘精炼事实卡 (${a.date}) ====================`);
+
+  if (market) {
+    L.push('【大盘与流动性】');
+    if (market.indices?.length) {
+      const idxStr = market.indices
+        .map((x) => `${x.name} ${x.changePct === null ? '—' : pctOr(x.changePct)}${x.turnover ? ' (' + formatYuan(x.turnover) + ')' : ''}`)
+        .join(' ｜ ');
+      L.push(`  指数表现: ${idxStr}`);
+    }
+    if (market.marketBreadth) {
+      L.push(`  全市场广度: 涨 ${market.marketBreadth.up} / 跌 ${market.marketBreadth.down} / 平 ${market.marketBreadth.flat}（共 ${market.marketBreadth.total} 只）`);
+    }
+    if (market.breadth) {
+      const ladderStr = market.ladder?.maxBoard ? ` ｜ 连板高度: ${market.ladder.maxBoard}板` : '';
+      L.push(`  短线情绪: 涨停 ${market.breadth.limitUp} ｜ 跌停 ${market.breadth.limitDown} ｜ 炸板 ${market.breadth.limitBreak} ｜ 封板率 ${market.breadth.sealRate}%${ladderStr}`);
+    }
+    if (market.sectors?.gainers?.length || market.sectors?.losers?.length) {
+      const topUp = (market.sectors.gainers || []).slice(0, 3).map((x) => `${x.name} ${pctOr(x.changePct)}`).join('、');
+      const topDown = (market.sectors.losers || []).slice(0, 3).map((x) => `${x.name} ${pctOr(x.changePct)}`).join('、');
+      L.push(`  概念题材: 领涨 [${topUp}] ｜ 领跌 [${topDown}]`);
+    }
+  }
+
+  L.push('');
+  L.push('【账户底账与变动】');
+  const totalAssetsYuan = pSummary?.totalAssetsC ? formatYuan(pSummary.totalAssetsC) : formatYuan(s.marketValueC + (s.cash || 0));
+  const cashYuan = formatYuan(s.cash || 0);
+  const repoYuan = pSummary?.repoPrincipalC ? formatYuan(pSummary.repoPrincipalC) : '0.00';
+  const posPct = pSummary?.totalAssetsC && pSummary.totalAssetsC > 0
+    ? ((s.marketValueC / pSummary.totalAssetsC) * 100).toFixed(2) + '%'
+    : (s.marketValueC + s.cash > 0 ? ((s.marketValueC / (s.marketValueC + s.cash)) * 100).toFixed(2) + '%' : '0.00%');
+
+  L.push(`  总资产: ${totalAssetsYuan} ｜ 股票仓位: ${posPct} ｜ 现金: ${cashYuan} ｜ 逆回购: ${repoYuan}`);
+
+  if (s.tradeCount) {
+    L.push(`  今日交易 (${s.tradeCount} 笔，已实现盈亏 ${formatYuan(s.dayRealizedC)}，手续费 ${formatYuan(s.dayFeesC)}):`);
+    for (const t of a.trades) {
+      const typeStr = t.type === 'buy' ? '买入' : '卖出';
+      const pnlStr = t.realizedPnl !== null ? ` | 实现盈亏 ${formatYuan(t.realizedPnl)}` : '';
+      L.push(`    - ${t.time || '--:--'} ${typeStr} ${t.code} ${t.name}: ${t.shares}股 @${t.priceText}${pnlStr}`);
+    }
+  } else {
+    L.push('  今日交易: 无买卖');
+  }
+
+  if (a.rows?.length) {
+    L.push(`  当前持仓股票 (${a.rows.length} 只，市值 ${formatYuan(s.marketValueC)}，浮动盈亏 ${formatYuan(s.floatPnlC)}):`);
+    for (const r of a.rows) {
+      L.push(`    - ${r.code} ${r.name}: ${r.shares}股，成本 ${yuanOr(r.avgCost)}，现价 ${priceOr(r.priceMilli)}(${pctOr(r.changePct)})，浮盈 ${yuanOr(r.floatPnl)}(${pctOr(r.floatPnlPct)}) ｜ 状态: ${r.badge}`);
+    }
+  } else {
+    L.push('  当前持仓股票: 无 (已空仓)');
+  }
+
+  L.push('========================================================================');
+  return L.join('\n');
+}
+
 async function cmdPositionReview(o) {
   const a = await position.analyzeHoldings({ date: o.date, account: o.account });
   a.generatedAt = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
@@ -685,6 +748,23 @@ async function cmdPositionReview(o) {
       fail(`--events 解析失败（传 JSON 数组或文件路径）: ${e.message}`);
     }
   }
+
+  // 精炼简报模式：输出 ~1KB 核心事实卡，直接生成 HTML 报告，省去长篇终端表格打印
+  if (o.brief) {
+    let pSummary = null;
+    try {
+      pSummary = await position.summary(o.account);
+    } catch (_) {}
+    log(formatReviewBrief(a, market, pSummary));
+    if (!o['no-html']) {
+      const file = o.out || path.join(reviewDir(), '持仓分析', `持仓分析${o.account ? '-' + o.account : ''}-${a.date}.html`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, buildHoldingsHtml({ analysis: a, market, events, options: { generatedAt: a.generatedAt } }), 'utf8');
+      log(`✔ HTML 完整图表报告已生成: ${file}`);
+    }
+    return;
+  }
+
   log(`== 持仓股分析 ${a.date}${o.account ? ' [' + o.account + ']' : ''} ==`);
   if (market) {
     const idx = market.indices.map((x) => `${x.name} ${x.changePct === null ? '—' : pctOr(x.changePct)}`).join(' ｜ ');
@@ -818,6 +898,9 @@ async function cmdPosition(argv) {
     }
     case 'review': {
       return cmdPositionReview(o);
+    }
+    case 'review-brief': {
+      return cmdPositionReview({ ...o, brief: true });
     }
     case 'sell': {
       if (!o.code) fail('position sell 需要 --code');
@@ -1034,6 +1117,7 @@ function cmdHelp() {
   investigate    --code X [--report YYYY-N]
                             一键个股体检（拉齐行情/三表/估值/异动并落盘）
   daily-snapshot [--date D]  一键每日复盘快照（涨停/跌停/炸板/连板/龙虎榜/热榜/板块/指数落盘）
+  review-brief   [--date D]  一键输出今日复盘精炼事实卡（~1KB，供 AI 搭子深度复盘，大表入 HTML）
   search         --channel <通道> --q "自然语言问句" [--size N] [--summary | --raw | --save T]
                              问财渠道（17 个）：announcement 公告 / news 新闻 / report 研报 /
                              astock 选股 / market 行情 / finance 财务 / event 事件(排雷) /
@@ -1059,10 +1143,11 @@ ETF/基金参数: --thscode 510300.SH（ETF/基金单只）
                  [--name --date --note --psych --fee N | --auto-fee [--account 名称]]
                  [--stop 价 --target 价 --zone 低-高（计划参数，供持仓分析判定）]
                  | plan --code X [--stop S --target T --zone A-B]（给已有持仓补/改计划参数）
-                 | review [--date D] [--out 路径] [--no-html] [--no-md] [--no-market] [--events 文件|JSON]
+                 | review [--date D] [--brief] [--out 路径] [--no-html] [--no-md] [--no-market] [--events 文件|JSON]
                    持仓股分析/复盘页：大盘（指数+情绪）+ 板块（领涨/领跌）+ 今日交易流水 + 持仓逐只判定
-                   （默认生成单文件 HTML 报告 + 打印 Markdown 片段；判定照《复盘模板生成指南》§3）
+                   （默认生成单文件 HTML 报告 + 打印 Markdown 片段；--brief 仅输出精炼事实卡）
                    --events 传风险日历（[{date,title,impact,source}]，AI 复盘时用 web 搜索补，不编造）
+                 | review-brief [--date D] （等同于 review --brief）
                  | sell --code X --shares N --price P [--date --psych --fee|--auto-fee]
                  | psych --code X --text "..." [--date D] | adjust --code X（除息复权成本调整）
                  | cash --amount N（现金/逆回购）| import --file F | reset --yes | list | summary | today [--date D]
@@ -1084,6 +1169,7 @@ export async function main() {
     options: {
       init: { type: 'boolean' }, template: { type: 'boolean' }, status: { type: 'boolean' },
       help: { type: 'boolean' }, full: { type: 'boolean' }, quick: { type: 'boolean' }, summary: { type: 'boolean' },
+      brief: { type: 'boolean' },
       yes: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
       price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' }, amount: { type: 'string' },
@@ -1123,11 +1209,12 @@ export async function main() {
   if (cmd === 'config') return cmdConfig(values);
   if (cmd === 'cache') return cmdCache({ _: positionals.slice(1), values });
   if (cmd === 'position') return cmdPosition({ _: positionals.slice(1), values });
+  if (cmd === 'review-brief') return cmdPositionReview({ ...values, brief: true });
   if (cmd === 'investigate') return cmdInvestigate(values);
   if (cmd === 'daily-snapshot') return cmdDailySnapshot(values);
   if (cmd === 'data') return cmdData(values);
   if (cmd === 'search') return cmdSearch(values);
-  log('A股助手 CLI: node src/cli.js <check|config|cache|position|data|search|investigate|daily-snapshot|help>（跑 help 看全部用法）');
+  log('A股助手 CLI: node src/cli.js <check|config|cache|position|review-brief|data|search|investigate|daily-snapshot|help>（跑 help 看全部用法）');
   process.exitCode = 1;
 }
 

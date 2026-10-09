@@ -51,15 +51,35 @@ export async function fetchMarketBreadth() {
   };
 }
 
-/** 按代码批量取指数/板块行情（分片避免 URL 过长） */
-async function indexQuotes(codes, chunk = 200) {
-  const out = [];
-  for (let i = 0; i < codes.length; i += chunk) {
-    const res = await getData('index-price-snapshot', { thscodes: codes.slice(i, i + chunk).join(',') });
+/**
+ * 单批取指数/板块行情。整批失败时二分拆小以定位失效代码并剔除。
+ * 必要性：上游对个别代码会返回 code=1002（Unknown thscode，例如目录里刚建、尚无行情的概念指数），
+ * 一个坏代码会让**整批 200 个**一起失败，导致板块排名整块为空。剔除坏代码比整块丢弃更有用。
+ * @returns {Promise<{items:object[], dropped:string[]}>}
+ */
+async function indexQuotesBatch(codes) {
+  try {
+    const res = await getData('index-price-snapshot', { thscodes: codes.join(',') });
     if (res && res.code !== undefined && res.code !== 0) throw new Error(`code=${res.code} ${res.message}`);
-    out.push(...(res?.data?.item ?? []));
+    return { items: res?.data?.item ?? [], dropped: [] };
+  } catch (e) {
+    if (codes.length <= 1) return { items: [], dropped: codes }; // 单个仍失败 → 该代码无行情，丢弃
+    const mid = Math.ceil(codes.length / 2);
+    const [a, b] = await Promise.all([indexQuotesBatch(codes.slice(0, mid)), indexQuotesBatch(codes.slice(mid))]);
+    return { items: [...a.items, ...b.items], dropped: [...a.dropped, ...b.dropped] };
   }
-  return out;
+}
+
+/** 按代码批量取指数/板块行情（分片避免 URL 过长）；返回行情与"无行情被跳过"的代码 */
+async function indexQuotes(codes, chunk = 200) {
+  const items = [];
+  const dropped = [];
+  for (let i = 0; i < codes.length; i += chunk) {
+    const r = await indexQuotesBatch(codes.slice(i, i + chunk));
+    items.push(...r.items);
+    dropped.push(...r.dropped);
+  }
+  return { items, dropped };
 }
 
 /**
@@ -108,7 +128,12 @@ export async function fetchMarketContext({ date, sectorTop = 8 } = {}) {
 
   if (poolRes.status === 'fulfilled') {
     const [up, dn, br] = poolRes.value.map((r) => r?.data ?? {});
-    const n = (d) => (d.item ?? []).length;
+    // 家数必须取 pagination.total：池子接口分页返回（默认 size=50，可用 --size 调整），
+    // 用 item.length 会在涨停 >50 家时被截断成 50，封板率随之算错。
+    const n = (d) => {
+      const t = Number(d?.pagination?.total);
+      return Number.isFinite(t) ? t : (d?.item ?? []).length;
+    };
     const limitUp = n(up), limitBreak = n(br);
     const denom = limitUp + limitBreak;
     ctx.breadth = {
@@ -152,7 +177,7 @@ export async function fetchMarketContext({ date, sectorTop = 8 } = {}) {
     const names = new Map((cat?.data?.item ?? []).map((x) => [x.thscode, x.name]));
     ctx.sectors.catalog = names.size;
     ctx.sectors.date = cat?.data?.timestamp ? shDate(cat.data.timestamp) : null;
-    const items = await indexQuotes([...names.keys()]);
+    const { items, dropped } = await indexQuotes([...names.keys()]);
     const rows = items
       .map((it) => ({
         code: it.thscode,
@@ -164,6 +189,7 @@ export async function fetchMarketContext({ date, sectorTop = 8 } = {}) {
       .filter((x) => x.changePct !== null);
     rows.sort((a, b) => b.changePct - a.changePct);
     ctx.sectors.total = rows.length;
+    ctx.sectors.dropped = dropped;
     ctx.sectors.gainers = rows.slice(0, sectorTop);
     ctx.sectors.losers = rows.slice(-sectorTop).reverse(); // 跌幅最大在前
     ctx.sectors.flatLine = rows.length ? { up: rows.filter((x) => x.changePct > 0).length, down: rows.filter((x) => x.changePct < 0).length } : null;

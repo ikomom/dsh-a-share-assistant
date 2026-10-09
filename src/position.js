@@ -36,7 +36,7 @@ function savePortfolio(p, account) {
   if (fs.existsSync(f)) {
     fs.copyFileSync(f, f + '.bak'); // 最近一份备份
     // 每日独立快照（backup/portfolio-YYYYMMDD.json），保留最近 30 份
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const day = beijingDate().replace(/-/g, '');
     const snapDir = path.join(path.dirname(f), 'backup');
     fs.mkdirSync(snapDir, { recursive: true });
     const snap = path.join(snapDir, path.basename(f).replace(/\.json$/, `-${day}.json`));
@@ -100,7 +100,7 @@ export function addPosition({ code, name = '', shares, price, date, time = '', n
     existing.shares = newShares;
     existing.avgCost = Math.round(newCostC / newShares);
     existing.cost = newCostC;
-    existing.openDate = existing.openDate || date || new Date().toISOString().slice(0, 10);
+    existing.openDate = existing.openDate || date || beijingDate();
     if (!existing.name && name) existing.name = name;
     if (note) existing.note = (existing.note ? existing.note + '；' : '') + note;
     applyPlan(existing, { stop, target, zoneLow, zoneHigh });
@@ -108,11 +108,11 @@ export function addPosition({ code, name = '', shares, price, date, time = '', n
     p.positions[key] = {
       code: key, name: name || key, shares: sh,
       avgCost: Math.round(costC / sh), cost: costC,
-      openDate: date || new Date().toISOString().slice(0, 10), note,
+      openDate: date || beijingDate(), note,
     };
     applyPlan(p.positions[key], { stop, target, zoneLow, zoneHigh });
   }
-  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares: sh, price: priceC, amount: amountC, fee: feeC, date: date || new Date().toISOString().slice(0, 10), time, note, psych, realizedPnl: null });
+  p.history.push({ id: p.nextId++, type: 'buy', code: key, name: name || key, shares: sh, price: priceC, amount: amountC, fee: feeC, date: date || beijingDate(), time, note, psych, realizedPnl: null });
   savePortfolio(p, account);
   return p.positions[key];
 }
@@ -163,7 +163,7 @@ export function sellPosition({ code, shares, price, date, time = '', note = '', 
   const priceC = toCents(price);
   const feeC = toCents(fee);
   const realizedC = Math.round((priceC - Number(pos.avgCost)) * sh) - feeC;
-  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares: sh, price: priceC, amount: priceC * sh, fee: feeC, date: date || new Date().toISOString().slice(0, 10), time, note, psych, realizedPnl: realizedC });
+  p.history.push({ id: p.nextId++, type: 'sell', code: key, name: pos.name, shares: sh, price: priceC, amount: priceC * sh, fee: feeC, date: date || beijingDate(), time, note, psych, realizedPnl: realizedC });
   pos.shares -= sh;
   pos.cost = Number(pos.cost) - Math.round(Number(pos.avgCost) * sh);
   if (pos.shares <= 0) delete p.positions[key];
@@ -189,6 +189,22 @@ export function setCash(amount, account) {
 
 // ── 国债逆回购（GC001/204001 等：融出资金、到期收回本息）────────────────────
 
+/** 北京时区的 YYYY-MM-DD（toISOString 走 UTC，晚上 8 点后会把日期算成前一天） */
+function beijingDate(d = new Date()) {
+  return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+}
+
+/**
+ * 逆回购到期日：成交日 + days 个自然日，再顺延到周一（周末不计息、资金不可用）。
+ * ⚠️ 仅跳过周末，**不含节假日**——长假前后的实际可用日以券商交割单为准，调用方需如实提示。
+ */
+function repoDueDate(start, days) {
+  const ms = new Date(start + 'T00:00:00+08:00').getTime() + days * 86400000;
+  const wk = new Date(ms).toLocaleDateString('en-US', { timeZone: 'Asia/Shanghai', weekday: 'short' });
+  const add = wk === 'Sat' ? 2 : wk === 'Sun' ? 1 : 0;
+  return beijingDate(new Date(ms + add * 86400000));
+}
+
 /** 记一笔逆回购：amount 元、rate 年化%（如 1.01）、days 天数 */
 export function addRepo({ code = '204001', amount, rate, days = 1, date, note = '', account }) {
   const p = loadPortfolio(account);
@@ -198,8 +214,8 @@ export function addRepo({ code = '204001', amount, rate, days = 1, date, note = 
   const r = Number(rate);
   if (!Number.isFinite(r) || r <= 0) throw new Error('逆回购利率(%)必须为正，如 1.01');
   const d = Math.max(1, Math.floor(Number(days) || 1));
-  const start = date || new Date().toISOString().slice(0, 10);
-  const due = new Date(new Date(start + 'T00:00:00+08:00').getTime() + d * 86400000).toISOString().slice(0, 10);
+  const start = date || beijingDate();
+  const due = repoDueDate(start, d);
   const interestC = Math.round(amountC * (r / 100) * (d / 365)); // 预期收益（分）
   const id = (p.repos.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0)) + 1;
   const rec = { id, code: String(code), amountC, rate: r, days: d, date: start, dueDate: due, settled: false, interestC, note };
@@ -216,7 +232,7 @@ export function settleRepo({ id, account }) {
   if (!rec) throw new Error(`未找到逆回购 #${id}`);
   if (rec.settled) throw new Error(`逆回购 #${id} 已结算`);
   rec.settled = true;
-  rec.settledAt = new Date().toISOString().slice(0, 10);
+  rec.settledAt = beijingDate();
   p.cash = (Number(p.cash) || 0) + rec.amountC + rec.interestC;
   p.repoPnlC = (Number(p.repoPnlC) || 0) + rec.interestC;
   savePortfolio(p, account);
@@ -533,13 +549,24 @@ export async function analyzeHoldings({ date, account } = {}) {
     .sort((a, b) => String(a.time).localeCompare(String(b.time)));
   const dayRealizedC = trades.reduce((s, t) => s + (t.realizedPnl || 0), 0);
   const dayFeesC = trades.reduce((s, t) => s + (t.fee || 0), 0);
+  const repos = p.repos || [];
+  const openRepos = repos.filter((x) => !x.settled && (!date || x.date <= day));
+  const repoPrincipalC = openRepos.reduce((s, x) => s + (Number(x.amountC) || 0), 0);
+  const repoInterestC = openRepos.reduce((s, x) => s + (Number(x.interestC) || 0), 0);
+  const cashC = Number(p.cash) || 0;
+  const totalAssetsC = marketValueC + cashC + repoPrincipalC;
+  const stockRatioPct = totalAssetsC ? Math.round((marketValueC / totalAssetsC) * 10000) / 100 : 0;
+  const repoRatioPct = totalAssetsC ? Math.round((repoPrincipalC / totalAssetsC) * 10000) / 100 : 0;
+  const cashRatioPct = totalAssetsC ? Math.round((cashC / totalAssetsC) * 10000) / 100 : 0;
   return {
     date: day, account: account || null, rows, groups, trades,
     summary: {
       count: rows.length, validCount: valid.length,
       costC, marketValueC, floatPnlC,
       floatPnlPct: costC ? Math.round((floatPnlC / costC) * 10000) / 100 : null,
-      cash: Number(p.cash) || 0, initialCapital: p.initialCapital,
+      cash: cashC, initialCapital: p.initialCapital,
+      repoPrincipalC, repoInterestC, repoCount: openRepos.length, repos: openRepos,
+      totalAssetsC, stockRatioPct, repoRatioPct, cashRatioPct,
       planMissing: rows.filter((r) => !r.hasPlan).length,
       missingQuote: rows.filter((r) => r.quoteMissing).map((r) => r.code),
       groupCounts: Object.fromEntries(groups.map((g) => [g.group, g.rows.length])),
@@ -551,7 +578,7 @@ export async function analyzeHoldings({ date, account } = {}) {
 /** 当日交易流水 */
 export function dayTrades(date, account) {
   const p = loadPortfolio(account);
-  const d = date || new Date().toISOString().slice(0, 10);
+  const d = date || beijingDate();
   return p.history.filter((h) => h.date === d);
 }
 
