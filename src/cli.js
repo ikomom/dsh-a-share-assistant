@@ -17,7 +17,7 @@ import { formatYuan, toCents, formatMilli } from './money.js';
 import { CACHE_ROOT, PROJECT_ROOT, NOTES_ROOT, reviewDir, getApiKey, getConfigSource, USER_CONFIG_PATH, homeDir, isConfigPresent } from './config.js';
 
 /** 插件版本（check 输出；会话中若代码被更新，可据此识别新旧） */
-export const CLI_VERSION = '0.1.3';
+export const CLI_VERSION = '0.2.0';
 
 function log(msg) {
   console.log(msg);

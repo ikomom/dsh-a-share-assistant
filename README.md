@@ -1,6 +1,6 @@
 # dsh-a-share-assistant
 
-[![Release v0.1.3](https://img.shields.io/badge/release-v0.1.3-5B4CF0?style=flat-square)](https://github.com/ikomom/dsh-a-share-assistant)
+[![Release v0.2.0](https://img.shields.io/badge/release-v0.2.0-5B4CF0?style=flat-square)](https://github.com/ikomom/dsh-a-share-assistant)
 [![Node >=18](https://img.shields.io/badge/Node-%3E%3D18-0B7285?style=flat-square)](https://nodejs.org/)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh%20plugin-5B4CF0?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 
