@@ -883,7 +883,7 @@ async function cmdPosition(argv) {
       // estimateFee 返回「分」；addPosition 的 fee 入参是「元」（内部 toCents），故先 /100 转元
       if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'buy', shares: s, price: pr, account: o.account }) / 100;
       const pl = parseZone(o.zone);
-      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal, stop: o.stop, target: o.target, zoneLow: pl.low, zoneHigh: pl.high, account: o.account });
+      const pos = position.addPosition({ code: o.code, name: o.name, shares: s, price: pr, date: o.date, time: o.time, note: o.note, psych: o.psych, fee: feeVal, stop: o.stop, target: o.target, zoneLow: pl.low, zoneHigh: pl.high, account: o.account });
       log(`✔ 已记录建仓/加仓: ${pos.code} ${pos.name} 现持仓 ${pos.shares} 股，均价 ${formatYuan(pos.avgCost)}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${pos.psych ? '（心理备注: ' + pos.psych + '）' : ''}`);
       if (pos.stopC || pos.targetC || pos.zoneLowC || pos.zoneHighC) log(`  计划参数: ${planText(pos)}`);
       return;
@@ -909,7 +909,7 @@ async function cmdPosition(argv) {
       let feeVal = num(o.fee);
       // 同上：estimateFee 返回「分」，先 /100 转成「元」再传
       if (!Number.isFinite(feeVal) && o['auto-fee']) feeVal = position.estimateFee({ side: 'sell', shares: s, price: pr, account: o.account }) / 100;
-      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, note: o.note, psych: o.psych, fee: feeVal, account: o.account });
+      const r = position.sellPosition({ code: o.code, shares: s, price: pr, date: o.date, time: o.time, note: o.note, psych: o.psych, fee: feeVal, account: o.account });
       log(`✔ 已卖出 ${r.code} ${s} 股，已实现盈亏 ${formatYuan(r.realizedPnl)}${r.closed ? '（已清仓）' : ''}${feeVal ? `（手续费${formatYuan(toCents(feeVal))}）` : ''}${o.psych ? '（心理备注: ' + o.psych + '）' : ''}`);
       return;
     }
@@ -1172,7 +1172,7 @@ export async function main() {
       brief: { type: 'boolean' },
       yes: { type: 'boolean' },
       capital: { type: 'string' }, name: { type: 'string' }, shares: { type: 'string' },
-      price: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' }, amount: { type: 'string' },
+      price: { type: 'string' }, time: { type: 'string' }, note: { type: 'string' }, psych: { type: 'string' }, text: { type: 'string' }, fee: { type: 'string' }, amount: { type: 'string' },
       'auto-fee': { type: 'boolean' }, account: { type: 'string' },
       stop: { type: 'string' }, target: { type: 'string' }, zone: { type: 'string' },
       'no-html': { type: 'boolean' }, 'no-md': { type: 'boolean' }, 'no-market': { type: 'boolean' },
