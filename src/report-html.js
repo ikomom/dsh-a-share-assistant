@@ -235,8 +235,14 @@ export function buildHoldingsHtml(p) {
     </tr>`).join('');
 
   const eventRows = events.length
-    ? events.map((e) => `<tr><td>${esc(e.date || '')}</td><td><b>${esc(e.title || '')}</b></td><td>${esc(e.impact || '')}</td><td class="note-small">${esc(e.source || '')}</td></tr>`).join('')
-    : `<tr><td colspan="4" class="empty">未提供。复盘时可用 web 搜索补齐（宏观数据发布、解禁、会议、财报窗口等），并在「来源」列标注链接——本页不编造事件。</td></tr>`;
+    ? events.map((e) => `<tr>
+        <td style="white-space:nowrap">${esc(e.date || '')}</td>
+        <td><b>${esc(e.title || '')}</b></td>
+        <td>${esc(e.stocksImpact || e.impact || '')}</td>
+        <td>${esc(e.macroLogic || e.impact || '')}</td>
+        <td class="note-small" style="white-space:nowrap">${esc(e.source || '')}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="5" class="empty">未提供。复盘时由 AI 结合财经日历补充，并在「来源」列标注链接——本页不编造事件。</td></tr>`;
 
   // 国债逆回购明细卡片
   const repoList = s.repos || [];
@@ -538,10 +544,10 @@ ${groupHtml || '<div class="card empty">（台账无持仓）</div>'}
     : '<div class="empty">今日无交易流水（台账里没有当日买卖记录）</div>'}
 </div>
 
-<h2 id="sec-events">五、风险日历（未来 3–5 日）</h2>
+<h2 id="sec-events">五、风险日历与持仓利多/利空穿透（未来 3–5 日）</h2>
 <div class="card">
   <table>
-    <tr><th>日期</th><th>事件</th><th>可能影响</th><th>来源</th></tr>
+    <tr><th>日期</th><th>重大事件</th><th>持仓与关注标的穿透影响</th><th>宏观逻辑与机理</th><th>数据来源</th></tr>
     ${eventRows}
   </table>
 </div>
