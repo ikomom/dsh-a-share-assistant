@@ -438,32 +438,35 @@ async function fetchBars(code, date) {
 
 /** 计划参数 vs 当日行情 → 分组/徽标/操作取向（对照指南 §3；无计划参数则只做成本盈亏分析）。
  *  入参与计划价统一用「厘」，避免 ETF 三位小数与分位精度打架。 */
-function classifyPlan({ lowM, highM, closeM }, plan) {
+function classifyPlan({ lowM, highM, closeM, isNewToday = false }, plan) {
   const stopM = Number(plan.stopMilli) || 0;
   const targetM = Number(plan.targetMilli) || 0;
   const zoneHighM = Number(plan.zoneHighMilli) || 0;
   const disp = (m) => `¥${formatMilli(m, m % 10 === 0 ? 2 : 3)}`;
   const hasPlan = Boolean(stopM || targetM || plan.zoneLowMilli || zoneHighM);
-  if (stopM && lowM && lowM <= stopM) {
-    return { group: 'stop', badge: '⚠️ 盘中破止损', action: `盘中已触及止损 ${disp(stopM)}，按纪律离场，破止损不摊平`, level: 0 };
+  if (stopM && closeM <= stopM) {
+    return { group: 'stop', badge: '⚠️ 跌破止损', action: `收盘已跌破止损 ${disp(stopM)}，次日择机离场，破位不摊平`, level: 0 };
+  }
+  if (!isNewToday && stopM && lowM && lowM <= stopM) {
+    return { group: 'stop', badge: '⚠️ 盘中破止损', action: `盘中曾触及止损 ${disp(stopM)}，收盘勉强收回，紧盯盘面防二次破位`, level: 1 };
   }
   if (stopM && closeM <= Math.round(stopM * 1.02)) {
-    return { group: 'stop', badge: '⚠️ 逼近止损', action: `收盘距止损 ${disp(stopM)} 不足 2%，紧盯盘面，破位即走`, level: 1 };
+    return { group: 'stop', badge: '⚠️ 逼近止损', action: `收盘距止损 ${disp(stopM)} 不足 2%，紧盯盘面，破位即走`, level: 2 };
   }
   if (targetM && highM && highM >= targetM) {
-    return { group: 'target', badge: '🎯 触第一目标', action: `盘中已触及目标 ${disp(targetM)}，分批止盈，不追高`, level: 2 };
+    return { group: 'target', badge: '🎯 触第一目标', action: `盘中已触及目标 ${disp(targetM)}，分批止盈，不追高`, level: 3 };
   }
   if (targetM && closeM >= Math.round(targetM * 0.98)) {
-    return { group: 'target', badge: '🎯 逼近目标', action: `收盘距目标 ${disp(targetM)} 不足 2%，可减半仓锁定利润`, level: 3 };
+    return { group: 'target', badge: '🎯 逼近目标', action: `收盘距目标 ${disp(targetM)} 不足 2%，可减半仓锁定利润`, level: 4 };
   }
   if (zoneHighM && lowM && lowM <= zoneHighM && (!stopM || closeM >= stopM)) {
-    return { group: 'zone', badge: '✅ 回到买入区', action: `当日最低回到买入区上沿 ${disp(zoneHighM)} 以内，计划内可低吸/加仓，不追阳线`, level: 4 };
+    return { group: 'zone', badge: '✅ 回到买入区', action: `当日最低回到买入区上沿 ${disp(zoneHighM)} 以内，计划内可低吸/加仓，不追阳线`, level: 5 };
   }
   return {
     group: 'hold',
     badge: hasPlan ? '➖ 持有观察' : '➖ 持有观察（未设计划参数）',
     action: hasPlan ? '未触及计划区间，持仓观察，不追阳线' : '台账未记止损/目标/买入区，仅做成本盈亏分析（position plan 可补）',
-    level: 5,
+    level: 6,
   };
 }
 
@@ -497,18 +500,18 @@ export async function analyzeHoldings({ date, account } = {}) {
     const openMilli = pick('open_price');
     const highMilli = pick('high_price');
     const lowMilli = pick('low_price');
-    const prevMilli = snapFresh ? toMilli(q.prev_price) : b.prev ? toMilli(b.prev.close_price) : 0;
-    const plan = { stopMilli: pos.stopMilli, targetMilli: pos.targetMilli, zoneLowMilli: pos.zoneLowMilli, zoneHighMilli: pos.zoneHighMilli };
-    const cls = classifyPlan({ lowM: lowMilli, highM: highMilli, closeM: priceMilli }, plan);
-    const avgMilli = Number(pos.avgCost) * 10;
-    const marketValueC = milliTimesSharesToCents(priceMilli, pos.shares);
-    const floatPnlC = milliTimesSharesToCents(priceMilli - avgMilli, pos.shares);
-    // 涨跌幅优先用数据源原值（厘级价差不足以还原真实涨跌幅）
-    const srcRatio = snapFresh ? Number(q.price_change_ratio_pct) : NaN;
     // 持仓来源：建仓日 / 已持有天数 / 最近一笔交易（避免把存量持仓误读成"今天买的"）
     const hist = p.history.filter((h) => String(h.code) === String(c) && h.date <= day);
     const lastH = hist[hist.length - 1] || null;
+    const isNewToday = pos.openDate === day || (lastH && lastH.date === day && lastH.type === 'buy');
     const holdingDays = pos.openDate ? Math.max(0, Math.round((Date.parse(day + 'T00:00:00+08:00') - Date.parse(pos.openDate + 'T00:00:00+08:00')) / 86400000)) : null;
+    const plan = { stopMilli: pos.stopMilli, targetMilli: pos.targetMilli, zoneLowMilli: pos.zoneLowMilli, zoneHighMilli: pos.zoneHighMilli };
+    const cls = classifyPlan({ lowM: lowMilli, highM: highMilli, closeM: priceMilli, isNewToday }, plan);
+    const prevMilli = snapFresh ? toMilli(q.prev_price) : b.prev ? toMilli(b.prev.close_price) : 0;
+    const avgMilli = Number(pos.avgCost) * 10;
+    const marketValueC = milliTimesSharesToCents(priceMilli, pos.shares);
+    const floatPnlC = milliTimesSharesToCents(priceMilli - avgMilli, pos.shares);
+    const srcRatio = snapFresh ? Number(q.price_change_ratio_pct) : NaN;
     rows.push({
       code: c, name: pos.name || c, isEtf: assetTypeOf(c) === 'etf', shares: pos.shares,
       avgCost: Number(pos.avgCost), avgMilli, price: Math.round(priceMilli / 10), priceMilli,
